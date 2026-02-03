@@ -1,10 +1,10 @@
 # VibeFlow
 
 <div align="center">
-  <img src="Assets/Vibeflow%20banner%202X.png" alt="VibeFlow banner" width="860" />
+  <img src="assets/Vibeflow%20banner%202X.png" alt="VibeFlow banner" width="860" />
   <p><strong>Supercharge your terminal workflow with context, intent, and flow.</strong></p>
   <p>Warp-inspired terminal IDE that captures intent, remembers context, and keeps you in flow.</p>
-  <img src="Assets/Vibeflow2X.png" alt="VibeFlow logo" width="72" height="72" />
+  <img src="assets/Vibeflow2X.png" alt="VibeFlow logo" width="72" height="72" />
 </div>
 
 ---
