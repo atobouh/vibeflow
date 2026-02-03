@@ -10,8 +10,9 @@
     "build": "node scripts/build.js",
     "dev": "node scripts/build.js --watch",
     "start": "electron .",
-    "dist": "npm run build && electron-builder",
-    "release": "npm run build && electron-builder --publish always"
+    "prepare:icons": "node scripts/prepare-icons.js",
+    "dist": "npm run prepare:icons && npm run build && electron-builder",
+    "release": "npm run prepare:icons && npm run build && electron-builder --publish always"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.5.2",
@@ -24,12 +25,14 @@
     "electron": "^28.2.0",
     "electron-builder": "^24.13.3",
     "esbuild": "^0.20.2",
+    "sharp": "^0.33.2",
     "typescript": "^5.4.5"
   },
   "build": {
     "appId": "com.vibeflow.app",
     "productName": "VibeFlow",
     "asar": true,
+    "buildResources": "build",
     "directories": {
       "output": "release"
     },
@@ -41,11 +44,11 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "assets/Vibeflow4X.png"
+      "icon": "build/icon.png"
     },
     "mac": {
       "target": "dmg",
-      "icon": "assets/Vibeflow4X.png"
+      "icon": "build/icon.png"
     }
   }
 }

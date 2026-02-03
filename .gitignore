@@ -4,3 +4,4 @@ ui/dist
 data
 *.log
 release
+build

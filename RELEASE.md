@@ -9,6 +9,7 @@ This repo ships Windows + macOS installers via GitHub Actions.
 ## Local installer builds (unsigned)
 ```bash
 npm install
+npm run prepare:icons
 npm run dist
 ```
 
