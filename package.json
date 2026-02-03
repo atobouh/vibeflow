@@ -32,9 +32,9 @@
     "appId": "com.vibeflow.app",
     "productName": "VibeFlow",
     "asar": true,
-    "buildResources": "build",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**",
