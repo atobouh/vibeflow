@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibeFlow | Production Build</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        app: {
+                            bg: '#09090b',         /* Main Window Background */
+                            panel: '#0c0c0e',      /* Secondary Panels */
+                            border: 'rgba(255,255,255,0.06)', /* Ultra-subtle border */
+                            active: '#18181b',     /* Active states */
+                            accent: '#3b82f6',     /* Vibe Blue */
+                            text: '#e4e4e7',       /* Primary Text */
+                            dim: '#71717a'         /* Dimmed Text */
+                        }
+                    },
+                    boxShadow: {
+                        'glow': '0 0 20px -5px rgba(59, 130, 246, 0.15)',
+                        'float': '0 10px 40px -10px rgba(0,0,0,0.8)',
+                        'inner-light': 'inset 0 1px 0 0 rgba(255,255,255,0.05)'
+                    },
+                    backgroundImage: {
+                        'noise': "url('data:image/svg+xml,%3Csvg viewBox=%220 0 200 200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter id=%22noiseFilter%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%220.65%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23noiseFilter)%22 opacity=%220.04%22/%3E%3C/svg%3E')",
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Modern Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+        body { 
+            background-color: #000; 
+            color: #e4e4e7; 
+            height: 100vh; 
+            overflow: hidden; 
+            display: flex; 
+            flex-direction: column;
+            user-select: none;
+        }
+
+        /* 1. TITLE BAR */
+        .title-bar {
+            height: 42px;
+            background: #09090b;
+            border-bottom: 1px solid var(--app-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-left: 12px;
+            -webkit-app-region: drag;
+        }
+        .no-drag { -webkit-app-region: no-drag; }
+
+        /* Tabs */
+        .tab {
+            height: 30px;
+            padding: 0 12px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #71717a;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            min-width: 140px;
+        }
+        .tab:hover { background: rgba(255,255,255,0.03); color: #a1a1aa; }
+        .tab.active {
+            background: #18181b;
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+
+        /* Windows Controls */
+        .win-btn { 
+            width: 46px; height: 100%; 
+            display: flex; align-items: center; justify-content: center; 
+            color: #999; cursor: pointer; transition: background 0.15s; 
+        }
+        .win-btn:hover { background: rgba(255,255,255,0.05); color: #fff; }
+        .win-btn.close:hover { background: #c42b1c; }
+
+        /* 2. MAIN WORKSPACE */
+        .workspace { flex: 1; display: flex; overflow: hidden; background: #050505; }
+        
+        /* Terminal */
+        .terminal-container {
+            flex: 1;
+            margin: 6px;
+            background: #0a0a0a;
+            border: 1px solid var(--app-border);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        /* Context Panel */
+        .context-panel {
+            width: 320px;
+            background: #0c0c0e;
+            border-left: 1px solid var(--app-border);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.3s cubic-bezier(0.2, 0, 0, 1);
+        }
+        .context-panel.collapsed { width: 48px; }
+
+        /* 3. COMMAND DOCK */
+        .command-dock {
+            height: 140px;
+            background: #09090b;
+            border-top: 1px solid var(--app-border);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 20;
+        }
+        
+        /* Command Input Field Styling */
+        .cmd-input-wrapper {
+            background: #121214;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .cmd-input-wrapper:focus-within {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 1px #3b82f6, 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        /* Utility classes for overlays */
+        .overlay-backdrop {
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+<body class="bg-noise">
+
+    <header class="title-bar">
+        <div class="flex items-center gap-4 flex-1 overflow-hidden no-drag">
+            <div class="flex items-center gap-2 mr-4 opacity-80 hover:opacity-100 transition-opacity">
+                <div class="w-5 h-5 bg-gradient-to-br from-blue-600 to-indigo-600 rounded flex items-center justify-center shadow-glow">
+                    <i data-lucide="zap" class="w-3 h-3 text-white fill-current"></i>
+                </div>
+                <span class="text-xs font-bold tracking-wide text-gray-300">VibeFlow</span>
+            </div>
+
+            <div class="flex items-center gap-2" id="tab-container">
+                <div class="tab active" id="active-tab">
+                    <i data-lucide="folder-git-2" class="w-3 h-3 text-blue-400"></i>
+                    <span class="truncate">vibeflow-core</span>
+                    <i data-lucide="x" class="w-3 h-3 ml-auto text-gray-600 hover:text-white rounded p-0.5"></i>
+                </div>
+                <div class="tab">
+                    <i data-lucide="server" class="w-3 h-3 text-emerald-500"></i>
+                    <span class="truncate">backend:3000</span>
+                    <i data-lucide="x" class="w-3 h-3 ml-auto text-gray-600 hover:text-white rounded p-0.5"></i>
+                </div>
+                <button onclick="triggerNewTab()" class="w-7 h-7 flex items-center justify-center rounded hover:bg-white/5 text-gray-500 hover:text-white transition-colors">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="flex h-full no-drag">
+            <div class="win-btn"><i data-lucide="minus" class="w-4 h-4"></i></div>
+            <div class="win-btn"><i data-lucide="square" class="w-3 h-3"></i></div>
+            <div class="win-btn close"><i data-lucide="x" class="w-4 h-4"></i></div>
+        </div>
+    </header>
+
+    <main class="workspace">
+        
+        <section class="terminal-container group relative">
+            <div id="active-terminal" class="absolute inset-0 p-4 font-mono text-xs md:text-sm text-gray-300 overflow-y-auto custom-scrollbar">
+                <div class="text-gray-600 mb-4 select-none">VibeFlow Terminal v0.9.2 • /bin/zsh</div>
+                
+                <div class="mb-6 opacity-60 hover:opacity-100 transition-opacity">
+                    <div class="flex gap-2 text-gray-500 mb-1 select-none">
+                        <span>~/vibeflow-core</span>
+                        <span>•</span>
+                        <span>14:20:05</span>
+                    </div>
+                    <div class="flex gap-2">
+                        <span class="text-green-500">➜</span>
+                        <span class="text-blue-400">npm run dev</span>
+                    </div>
+                    <div class="pl-5 mt-1 text-gray-400 border-l border-white/5">
+                        <span class="text-green-400">ready</span> - started server on 0.0.0.0:3000, url: http://localhost:3000<br>
+                        <span class="text-blue-400">event</span> - compiled successfully in 1241 ms
+                    </div>
+                </div>
+
+                <div class="flex gap-2 items-center">
+                    <span class="text-green-500 font-bold">➜</span>
+                    <span class="text-cyan-400 font-bold">~/vibeflow-core</span>
+                    <span class="text-gray-500">git:(</span><span class="text-red-400">main</span><span class="text-gray-500">)</span>
+                    <span class="text-white">codex "Refactor the auth middleware"</span><span class="w-2 h-4 bg-gray-500 animate-pulse"></span>
+                </div>
+            </div>
+
+            <div id="new-tab-screen" class="absolute inset-0 z-10 bg-[#0a0a0a] flex flex-col items-center justify-center hidden">
+                <div class="text-center space-y-8 animate-in fade-in duration-300">
+                    <div class="w-20 h-20 bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-2xl flex items-center justify-center mx-auto border border-white/5 shadow-glow">
+                        <i data-lucide="zap" class="w-10 h-10 text-blue-500"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-white mb-2">Start a VibeFlow Session</h2>
+                        <p class="text-gray-500 text-sm">Select a project to begin capturing context.</p>
+                    </div>
+                    <button class="px-6 py-3 bg-[#18181b] hover:bg-[#222] border border-white/10 rounded-lg text-sm text-white font-medium flex items-center gap-3 mx-auto transition-all hover:border-blue-500/30 hover:shadow-lg">
+                        <i data-lucide="folder-open" class="w-4 h-4 text-gray-400"></i>
+                        Select Repository
+                    </button>
+                    <div class="text-xs text-gray-600 font-mono mt-8">Press <kbd class="bg-[#1a1a1c] px-1 rounded border border-[#333]">Cmd+O</kbd> to open</div>
+                </div>
+            </div>
+        </section>
+
+        <aside class="context-panel" id="context-panel">
+            
+            <div class="h-10 border-b border-app-border flex items-center justify-between px-4 bg-[#0e0e10]">
+                <div class="flex items-center gap-2 overflow-hidden title-container">
+                    <div class="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                    <span class="text-[10px] font-bold uppercase tracking-widest text-gray-400">Live Context</span>
+                </div>
+                <button onclick="togglePanel()" class="text-gray-600 hover:text-white transition-colors">
+                    <i data-lucide="panel-right-close" class="w-4 h-4" id="collapse-icon"></i>
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5 space-y-6 panel-content">
+                
+                <div class="group">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-medium text-blue-400">Active Intent</span>
+                        <i onclick="triggerIntentPopup()" data-lucide="edit-3" class="w-3 h-3 text-gray-600 opacity-0 group-hover:opacity-100 cursor-pointer hover:text-white transition-all"></i>
+                    </div>
+                    <div class="p-3 bg-[#151518] border border-blue-500/10 rounded-lg shadow-inner-light text-sm text-gray-200 leading-relaxed relative overflow-hidden">
+                        <div class="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500"></div>
+                        "Refactor auth middleware to handle JWTs, but ignore refresh tokens."
+                    </div>
+                </div>
+
+                <div>
+                    <span class="text-xs font-medium text-gray-500 mb-2 block">Flow State</span>
+                    <div class="flex items-end gap-2 mb-1">
+                        <span class="text-2xl font-mono font-bold text-white">42:15</span>
+                        <span class="text-[10px] text-green-400 mb-1.5 flex items-center gap-1">
+                            <i data-lucide="activity" class="w-3 h-3"></i> Optimal
+                        </span>
+                    </div>
+                    <div class="w-full h-1 bg-[#1a1a1c] rounded-full overflow-hidden">
+                        <div class="h-full bg-gradient-to-r from-blue-600 to-indigo-500 w-[85%] shadow-glow"></div>
+                    </div>
+                </div>
+
+                <div class="flex-1">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs font-medium text-gray-500">Parked Thoughts</span>
+                        <kbd class="text-[9px] font-mono text-gray-600 border border-gray-800 rounded px-1">Alt+P</kbd>
+                    </div>
+                    <ul class="space-y-2">
+                        <li class="flex gap-3 p-2 rounded hover:bg-[#1a1a1c] cursor-pointer group transition-colors border border-transparent hover:border-white/5">
+                            <i data-lucide="sticky-note" class="w-3 h-3 mt-1 text-gray-600 group-hover:text-purple-400 transition-colors"></i>
+                            <span class="text-xs text-gray-400 group-hover:text-gray-300 leading-snug">Verify Redis config in production env</span>
+                        </li>
+                        <li class="flex gap-3 p-2 rounded hover:bg-[#1a1a1c] cursor-pointer group transition-colors border border-transparent hover:border-white/5">
+                            <i data-lucide="sticky-note" class="w-3 h-3 mt-1 text-gray-600 group-hover:text-purple-400 transition-colors"></i>
+                            <span class="text-xs text-gray-400 group-hover:text-gray-300 leading-snug">Update README with new API keys</span>
+                        </li>
+                    </ul>
+                </div>
+
+            </div>
+
+            <div class="p-4 border-t border-app-border panel-content">
+                <button class="w-full py-2 bg-[#1a1a1c] hover:bg-[#222] border border-app-border text-xs font-medium text-gray-300 rounded flex items-center justify-center gap-2 transition-all">
+                    <i data-lucide="copy" class="w-3 h-3"></i> Copy Context
+                </button>
+            </div>
+
+            <div class="hidden h-full flex-col items-center pt-6 vertical-label">
+                <div class="w-1.5 h-1.5 rounded-full bg-green-500 mb-4"></div>
+                <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest" style="writing-mode: vertical-rl; transform: rotate(180deg);">Context</span>
+            </div>
+        </aside>
+
+    </main>
+
+    <footer class="command-dock">
+        
+        <div class="flex-1 overflow-y-auto px-6 py-4 space-y-2 flex flex-col justify-end">
+            <div class="flex items-center gap-3 opacity-40 hover:opacity-100 transition-opacity">
+                <span class="text-[10px] font-mono text-gray-600 w-12 text-right">14:21</span>
+                <span class="text-xs text-gray-400 font-mono">npm install</span>
+            </div>
+            <div class="flex items-center gap-3 opacity-60 hover:opacity-100 transition-opacity">
+                <span class="text-[10px] font-mono text-gray-600 w-12 text-right">14:22</span>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 font-mono">@codex</span>
+                    <span class="text-xs text-gray-300 font-mono">"Explain the error"</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="px-6 pb-5 pt-2">
+            <div class="cmd-input-wrapper p-1">
+                <div class="pl-3 pr-2 flex items-center justify-center">
+                    <span class="text-green-500 font-mono font-bold text-sm">➜</span>
+                </div>
+                <input type="text" 
+                       placeholder="Send command to terminal..." 
+                       class="flex-1 bg-transparent border-none outline-none text-sm text-white px-2 py-2.5 font-mono placeholder-gray-600"
+                       autofocus>
+                
+                <div class="flex items-center gap-2 pr-2">
+                    <button class="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-blue-400 transition-colors" title="Use Codex Agent">
+                        <i data-lucide="sparkles" class="w-4 h-4"></i>
+                    </button>
+                    <div class="h-4 w-px bg-white/10"></div>
+                    <button class="p-1.5 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-colors">
+                        <i data-lucide="arrow-up" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="flex justify-between items-center mt-2 px-1">
+                <span class="text-[10px] text-gray-600">Terminal bridge active</span>
+                <div class="flex gap-3">
+                    <span class="text-[10px] text-gray-600 flex items-center gap-1"><kbd class="font-sans border border-gray-700 rounded px-1">↑</kbd> History</span>
+                    <span class="text-[10px] text-gray-600 flex items-center gap-1"><kbd class="font-sans border border-gray-700 rounded px-1">@</kbd> Agent</span>
+                </div>
+            </div>
+        </div>
+
+    </footer>
+
+    <div id="intent-popup" class="fixed inset-0 z-50 flex items-start justify-center pt-32 overlay-backdrop hidden transition-opacity duration-200">
+        <div class="w-[500px] bg-[#0c0c0e] border border-white/10 rounded-xl shadow-2xl transform scale-100 transition-all overflow-hidden">
+            <div class="px-4 py-3 bg-[#121214] border-b border-white/5 flex justify-between items-center">
+                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                    <i data-lucide="target" class="w-3 h-3 text-blue-500"></i> Set Intent
+                </h3>
+                <kbd class="text-[9px] text-gray-600 border border-[#333] px-1 rounded">Esc</kbd>
+            </div>
+            <div class="p-4">
+                <input type="text" class="w-full bg-transparent border-none outline-none text-lg text-white placeholder-gray-600 font-medium" placeholder="What are you trying to achieve?">
+            </div>
+            <div class="px-4 py-2 bg-[#121214] border-t border-white/5 flex justify-between items-center text-[10px] text-gray-500">
+                <span>Applies to current session</span>
+                <span class="flex items-center gap-1">Press <kbd class="bg-[#222] px-1 rounded text-gray-300">Enter</kbd> to save</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="resume-screen" class="fixed inset-0 z-50 flex items-center justify-center overlay-backdrop animate-in fade-in duration-300">
+        <div class="w-full max-w-4xl p-8 bg-[#09090b] border border-white/10 rounded-2xl shadow-float relative overflow-hidden">
+            <div class="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2"></div>
+            
+            <div class="relative z-10">
+                <div class="text-center mb-10">
+                    <div class="inline-flex items-center gap-2 mb-3 text-blue-500 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">
+                        <i data-lucide="zap" class="w-4 h-4 fill-current"></i>
+                        <span class="text-xs font-bold tracking-wide uppercase">VibeFlow Resume</span>
+                    </div>
+                    <h1 class="text-3xl font-bold text-white mb-2">Welcome Back, Dev</h1>
+                    <p class="text-gray-500">You were in deep flow 2 hours ago. Here is where you left off.</p>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4 mb-8">
+                    <div class="col-span-1 space-y-4">
+                        <div class="p-4 bg-[#121214] border border-white/5 rounded-xl">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Session Duration</div>
+                            <div class="text-2xl font-mono text-white">01:42:15</div>
+                        </div>
+                        <div class="p-4 bg-[#121214] border border-white/5 rounded-xl">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Flow State</div>
+                            <div class="text-lg text-green-400 flex items-center gap-2">
+                                <i data-lucide="activity" class="w-4 h-4"></i> Optimal
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-span-2 p-5 bg-[#121214] border border-white/5 rounded-xl flex flex-col">
+                        <div class="flex justify-between items-start mb-4">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider">Last Active Intent</div>
+                            <span class="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">In Progress</span>
+                        </div>
+                        <div class="text-lg text-white font-medium leading-relaxed mb-6">
+                            "Refactor auth middleware to handle JWTs, but ignore refresh tokens for now."
+                        </div>
+                        
+                        <div class="mt-auto pt-4 border-t border-white/5">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider mb-2">Suggested Next Step</div>
+                            <div class="flex items-center gap-2 text-sm text-gray-300">
+                                <i data-lucide="arrow-right-circle" class="w-4 h-4 text-purple-400"></i>
+                                <span>Check <code class="bg-[#222] px-1 rounded text-gray-200">auth.ts</code> for refresh token logic placeholders.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-center gap-4">
+                    <button class="px-6 py-3 bg-[#121214] hover:bg-[#1a1a1c] border border-white/10 rounded-lg text-sm text-gray-300 font-medium transition-all flex items-center gap-2">
+                        <i data-lucide="plus" class="w-4 h-4"></i>
+                        New Session
+                    </button>
+                    <button class="px-6 py-3 bg-[#121214] hover:bg-[#1a1a1c] border border-white/10 rounded-lg text-sm text-gray-300 font-medium transition-all flex items-center gap-2">
+                        <i data-lucide="copy" class="w-4 h-4"></i>
+                        Copy Context
+                    </button>
+                    <button onclick="dismissResume()" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-lg shadow-lg shadow-blue-900/20 transition-all flex items-center gap-2">
+                        <i data-lucide="play" class="w-4 h-4 fill-current"></i>
+                        Continue Session
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // Panel Toggle Logic
+        const panel = document.getElementById('context-panel');
+        const icon = document.getElementById('collapse-icon');
+        const content = panel.querySelectorAll('.panel-content, .title-container');
+        const vertical = panel.querySelector('.vertical-label');
+        let collapsed = false;
+
+        function togglePanel() {
+            collapsed = !collapsed;
+            if (collapsed) {
+                panel.classList.add('collapsed');
+                content.forEach(el => el.classList.add('hidden'));
+                vertical.classList.remove('hidden');
+                vertical.classList.add('flex');
+                icon.setAttribute('data-lucide', 'panel-left-open');
+            } else {
+                panel.classList.remove('collapsed');
+                content.forEach(el => el.classList.remove('hidden'));
+                vertical.classList.add('hidden');
+                vertical.classList.remove('flex');
+                icon.setAttribute('data-lucide', 'panel-right-close');
+            }
+            lucide.createIcons();
+        }
+
+        // --- NEW LOGIC FOR SCREENS ---
+
+        // 1. Resume Screen Logic
+        function dismissResume() {
+            const screen = document.getElementById('resume-screen');
+            screen.style.opacity = '0';
+            setTimeout(() => {
+                screen.classList.add('hidden');
+            }, 300);
+        }
+
+        // 2. Intent Popup Logic
+        const intentPopup = document.getElementById('intent-popup');
+        
+        function triggerIntentPopup() {
+            intentPopup.classList.remove('hidden');
+            intentPopup.querySelector('input').focus();
+        }
+
+        // Close popup on Esc or click outside
+        intentPopup.addEventListener('click', (e) => {
+            if (e.target === intentPopup) intentPopup.classList.add('hidden');
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') intentPopup.classList.add('hidden');
+            if (e.altKey && e.key === 'i') { // Hotkey Alt+I simulation
+                e.preventDefault();
+                triggerIntentPopup();
+            }
+        });
+
+        // 3. New Tab / Idle Screen Logic
+        function triggerNewTab() {
+            // Simulate switching to a new tab
+            const activeTerm = document.getElementById('active-terminal');
+            const idleScreen = document.getElementById('new-tab-screen');
+            const activeTab = document.getElementById('active-tab');
+
+            // Toggle visibility
+            activeTerm.classList.add('hidden');
+            idleScreen.classList.remove('hidden');
+            
+            // Visual feedback on tabs (unselect active)
+            activeTab.classList.remove('active', 'bg-[#18181b]', 'border-white/10');
+            activeTab.classList.add('text-gray-500', 'hover:bg-white/5');
+        }
+    </script>
+</body>
+</html>
