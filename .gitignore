@@ -3,3 +3,4 @@ dist
 ui/dist
 data
 *.log
+release

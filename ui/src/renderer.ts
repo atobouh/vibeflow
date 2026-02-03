@@ -88,6 +88,11 @@ const receiptFlow = document.getElementById("vf-receipt-flow");
 const receiptCopy = document.getElementById("vf-receipt-copy");
 const receiptClose = document.getElementById("vf-receipt-close");
 const receiptNew = document.getElementById("vf-receipt-new");
+const confirmOverlay = document.getElementById("vf-confirm-overlay");
+const confirmTitle = document.getElementById("vf-confirm-title");
+const confirmMessage = document.getElementById("vf-confirm-message");
+const confirmCancel = document.getElementById("vf-confirm-cancel");
+const confirmOk = document.getElementById("vf-confirm-ok");
 
 const DEBUG_UI = (() => {
   try {
@@ -164,7 +169,12 @@ if (
   !receiptFlow ||
   !receiptCopy ||
   !receiptClose ||
-  !receiptNew
+  !receiptNew ||
+  !confirmOverlay ||
+  !confirmTitle ||
+  !confirmMessage ||
+  !confirmCancel ||
+  !confirmOk
 ) {
   throw new Error("UI missing required elements");
 }
@@ -180,12 +190,19 @@ let flashTimer: number | null = null;
 const isIdleScreenOpen = () => welcomePane.classList.contains("is-open");
 let chatIsCollapsed = false;
 let settingsAudioInput: HTMLInputElement | null = null;
+let settingsSessionSelect: HTMLSelectElement | null = null;
+let settingsRepoSelect: HTMLSelectElement | null = null;
+let settingsDeleteSessionButton: HTMLButtonElement | null = null;
+let settingsDeleteRepoButton: HTMLButtonElement | null = null;
+let settingsVersionLabel: HTMLElement | null = null;
 let historyRepoList: HTMLElement | null = null;
 let historySessionList: HTMLElement | null = null;
 let historySelectedRepo: string | null = null;
 let historySessionsCache: SessionRecord[] = [];
 let openHistorySessionId: string | null = null;
 let toolPanelCollapsed = false;
+let confirmAction: (() => void) | null = null;
+let settingsRepoStats = new Map<string, { name: string; count: number }>();
 
 const setTerminalStdin = (term: Terminal, enabled: boolean) => {
   const termAny = term as unknown as {
@@ -200,6 +217,26 @@ const setTerminalStdin = (term: Terminal, enabled: boolean) => {
     termAny.options = {};
   }
   termAny.options.disableStdin = !enabled;
+};
+
+const openConfirm = (options: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+}) => {
+  confirmTitle.textContent = options.title;
+  confirmMessage.textContent = options.message;
+  confirmOk.textContent = options.confirmLabel || "Confirm";
+  confirmOverlay.style.display = "flex";
+  confirmOverlay.setAttribute("aria-hidden", "false");
+  confirmAction = options.onConfirm;
+};
+
+const closeConfirm = () => {
+  confirmOverlay.style.display = "none";
+  confirmOverlay.setAttribute("aria-hidden", "true");
+  confirmAction = null;
 };
 
 const setTerminalInputEnabled = (enabled: boolean) => {
@@ -498,14 +535,79 @@ const renderSettingsPane = (container: HTMLDivElement) => {
             </div>
           </div>
         </div>
+        <div class="panel-card settings-danger">
+          <h3>Data Controls</h3>
+          <div class="settings-field">
+            <label for="vf-settings-session-select">Delete session</label>
+            <select id="vf-settings-session-select" class="settings-select"></select>
+            <button id="vf-settings-session-delete" class="danger-button" type="button">
+              Delete session
+            </button>
+          </div>
+          <div class="settings-field" style="margin-top: 16px;">
+            <label for="vf-settings-repo-select">Delete repo context</label>
+            <select id="vf-settings-repo-select" class="settings-select"></select>
+            <button id="vf-settings-repo-delete" class="danger-button" type="button">
+              Delete repo context
+            </button>
+          </div>
+        </div>
         <div class="panel-card">
           <h3>Session Trust</h3>
           <div class="settings-hint">All session data is stored locally on this device.</div>
+        </div>
+        <div class="panel-card">
+          <h3>About</h3>
+          <div class="settings-about">
+            <div class="about-row">
+              <div class="about-meta">
+                <div class="about-title">Built by Dev Kuns</div>
+                <div class="about-sub">Creator • vibeathon</div>
+              </div>
+              <button
+                class="about-link"
+                type="button"
+                data-external-url="https://github.com/atobouh"
+              >
+                GitHub
+              </button>
+            </div>
+            <div class="about-row">
+              <div class="about-meta">
+                <div class="about-title">BridgeMind</div>
+                <div class="about-sub">Community • join the conversation</div>
+              </div>
+              <button
+                class="about-link"
+                type="button"
+                data-external-url="https://discord.gg/bridgemind"
+              >
+                Discord
+              </button>
+            </div>
+            <div class="about-row">
+              <div class="about-meta">
+                <div class="about-title">VibeFlow Version</div>
+                <div id="vf-about-version" class="about-sub">Loading...</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   `;
   settingsAudioInput = container.querySelector("#vf-setting-audio") as HTMLInputElement | null;
+  settingsSessionSelect = container.querySelector("#vf-settings-session-select") as
+    | HTMLSelectElement
+    | null;
+  settingsRepoSelect = container.querySelector("#vf-settings-repo-select") as HTMLSelectElement | null;
+  settingsDeleteSessionButton = container.querySelector("#vf-settings-session-delete") as
+    | HTMLButtonElement
+    | null;
+  settingsDeleteRepoButton = container.querySelector("#vf-settings-repo-delete") as
+    | HTMLButtonElement
+    | null;
+  settingsVersionLabel = container.querySelector("#vf-about-version");
   updateAudioToggle();
   settingsAudioInput?.addEventListener("change", () => {
     audioEnabled = !!settingsAudioInput?.checked;
@@ -513,6 +615,54 @@ const renderSettingsPane = (container: HTMLDivElement) => {
       playClick();
     }
   });
+  void refreshSettingsData();
+  settingsDeleteSessionButton?.addEventListener("click", () => {
+    if (!settingsSessionSelect?.value) {
+      return;
+    }
+    const sessionId = settingsSessionSelect.value;
+    openConfirm({
+      title: "Delete session?",
+      message: "This will permanently delete the selected session. It cannot be recovered.",
+      confirmLabel: "Delete session",
+      onConfirm: async () => {
+        await window.vibeflow.deleteSession(sessionId);
+        openHistorySessionId = null;
+        await refreshSettingsData();
+        await refreshHistory();
+      }
+    });
+  });
+  settingsDeleteRepoButton?.addEventListener("click", () => {
+    if (!settingsRepoSelect?.value) {
+      return;
+    }
+    const repoKey = settingsRepoSelect.value;
+    const repoInfo = settingsRepoStats.get(repoKey);
+    const repoLabel = repoInfo?.name || "this repo";
+    const countText = repoInfo ? ` (${repoInfo.count} sessions)` : "";
+    openConfirm({
+      title: "Delete repo context?",
+      message: `This will permanently delete all stored context for ${repoLabel}${countText}. It cannot be recovered.`,
+      confirmLabel: "Delete repo context",
+      onConfirm: async () => {
+        await window.vibeflow.deleteRepoContext(repoKey);
+        openHistorySessionId = null;
+        await refreshSettingsData();
+        await refreshHistory();
+      }
+    });
+  });
+  container.querySelectorAll<HTMLElement>("[data-external-url]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const url = button.dataset.externalUrl;
+      if (url) {
+        void window.vibeflow.openExternal(url);
+        playClick();
+      }
+    });
+  });
+  void refreshAboutVersion();
 };
 
 const setToolPanelVisible = (visible: boolean) => {
@@ -655,6 +805,10 @@ const openSpecialTab = (kind: "settings" | "history") => {
     if (kind === "history") {
       void refreshHistory();
     }
+    if (kind === "settings") {
+      void refreshSettingsData();
+      void refreshAboutVersion();
+    }
     return;
   }
   logUi("openSpecialTab-create", { kind, tabId: spec.id });
@@ -680,6 +834,10 @@ const openSpecialTab = (kind: "settings" | "history") => {
   setActiveTab(spec.id, "open-special-tab");
   if (kind === "history") {
     void refreshHistory();
+  }
+  if (kind === "settings") {
+    void refreshSettingsData();
+    void refreshAboutVersion();
   }
 };
 
@@ -1183,6 +1341,109 @@ const refreshRecentRepos = async () => {
   }
 };
 
+const refreshSettingsData = async () => {
+  if (!settingsSessionSelect || !settingsRepoSelect) {
+    return;
+  }
+  const sessions: SessionList = await window.vibeflow.getAllSessions();
+  const endedSessions = sessions.filter((session) => session.endedAt);
+  const sortedSessions = endedSessions.sort(
+    (a, b) => Date.parse(b.endedAt || b.startedAt) - Date.parse(a.endedAt || a.startedAt)
+  );
+
+  settingsSessionSelect.innerHTML = "";
+  if (sortedSessions.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No sessions available";
+    settingsSessionSelect.appendChild(option);
+    settingsSessionSelect.disabled = true;
+    if (settingsDeleteSessionButton) {
+      settingsDeleteSessionButton.disabled = true;
+    }
+  } else {
+    settingsSessionSelect.disabled = false;
+    if (settingsDeleteSessionButton) {
+      settingsDeleteSessionButton.disabled = false;
+    }
+    for (const session of sortedSessions.slice(0, 50)) {
+      const option = document.createElement("option");
+      option.value = session.id;
+      const duration = formatDuration(session.flowSummary?.sessionDurationMs || 0);
+      option.textContent = `${titleFromPath(session.projectRoot, session.cwd)} • ${formatTime(
+        session.endedAt || session.startedAt
+      )} • ${duration}`;
+      settingsSessionSelect.appendChild(option);
+    }
+  }
+
+  const repoMap = new Map<
+    string,
+    { key: string; name: string; count: number; lastEndedAt: string }
+  >();
+
+  for (const session of sessions) {
+    const key = session.projectRoot || session.cwd;
+    const existing = repoMap.get(key);
+    const lastEndedAt = session.endedAt || session.startedAt;
+    if (!existing) {
+      repoMap.set(key, {
+        key,
+        name: titleFromPath(session.projectRoot, session.cwd),
+        count: 1,
+        lastEndedAt
+      });
+    } else {
+      existing.count += 1;
+      if (Date.parse(lastEndedAt) > Date.parse(existing.lastEndedAt)) {
+        existing.lastEndedAt = lastEndedAt;
+      }
+    }
+  }
+
+  settingsRepoStats = new Map(
+    Array.from(repoMap.values()).map((repo) => [repo.key, { name: repo.name, count: repo.count }])
+  );
+
+  settingsRepoSelect.innerHTML = "";
+  if (repoMap.size === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No repo context available";
+    settingsRepoSelect.appendChild(option);
+    settingsRepoSelect.disabled = true;
+    if (settingsDeleteRepoButton) {
+      settingsDeleteRepoButton.disabled = true;
+    }
+  } else {
+    settingsRepoSelect.disabled = false;
+    if (settingsDeleteRepoButton) {
+      settingsDeleteRepoButton.disabled = false;
+    }
+    const repoList = Array.from(repoMap.values()).sort(
+      (a, b) => Date.parse(b.lastEndedAt) - Date.parse(a.lastEndedAt)
+    );
+    for (const repo of repoList) {
+      const option = document.createElement("option");
+      option.value = repo.key;
+      option.textContent = `${repo.name} (${repo.count} sessions)`;
+      settingsRepoSelect.appendChild(option);
+    }
+  }
+};
+
+const refreshAboutVersion = async () => {
+  if (!settingsVersionLabel) {
+    return;
+  }
+  try {
+    const version = await window.vibeflow.getAppVersion();
+    settingsVersionLabel.textContent = `v${version}`;
+  } catch {
+    settingsVersionLabel.textContent = "Version unavailable";
+  }
+};
+
 const refreshHistory = async () => {
   if (!historyRepoList || !historySessionList) {
     return;
@@ -1519,6 +1780,26 @@ overlayInput.addEventListener("keydown", (event) => {
 overlay.addEventListener("click", (event) => {
   if (event.target === overlay) {
     closeOverlay();
+  }
+});
+
+confirmCancel.addEventListener("click", () => {
+  closeConfirm();
+  playClick();
+});
+
+confirmOk.addEventListener("click", () => {
+  const action = confirmAction;
+  closeConfirm();
+  if (action) {
+    action();
+  }
+  playClick();
+});
+
+confirmOverlay.addEventListener("click", (event) => {
+  if (event.target === confirmOverlay) {
+    closeConfirm();
   }
 });
 

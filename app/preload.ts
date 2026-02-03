@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld("vibeflow", {
   getActiveSession: (tabId: string) => ipcRenderer.invoke("session-get-active", tabId),
   getRecentSessions: () => ipcRenderer.invoke("session-get-recent"),
   getAllSessions: () => ipcRenderer.invoke("session-get-all"),
+  deleteSession: (sessionId: string) => ipcRenderer.invoke("session-delete", sessionId),
+  deleteRepoContext: (repoKey: string) => ipcRenderer.invoke("session-delete-repo", repoKey),
+  getAppVersion: () => ipcRenderer.invoke("app-get-version"),
+  openExternal: (url: string) => ipcRenderer.invoke("app-open-external", url),
   getRepoTree: (tabId: string) => ipcRenderer.invoke("repo-get-tree", tabId),
   readRepoFile: (tabId: string, relPath: string) =>
     ipcRenderer.invoke("repo-read-file", tabId, relPath),

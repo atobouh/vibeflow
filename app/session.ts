@@ -66,9 +66,6 @@ type SessionState = {
   tabs: Map<string, ActiveTabState>;
 };
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
-
 const IDLE_GAP_THRESHOLD_MS = 5 * 60 * 1000;
 const AUTO_END_THRESHOLD_MS = 10 * 60 * 1000;
 const ACTIVITY_SAMPLE_MS = 1000;
@@ -77,52 +74,7 @@ const DRIFT_BLOCK_MAX_MS = 5 * 60 * 1000;
 const DRIFT_BLOCK_MIN_MS = 30 * 1000;
 const CONTEXT_LOSS_THRESHOLD_MS = 5 * 60 * 1000;
 
-function ensureDataDir() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-function loadSessions(): SessionRecord[] {
-  try {
-    if (!fs.existsSync(SESSIONS_FILE)) {
-      return [];
-    }
-    const raw = fs.readFileSync(SESSIONS_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.map((record, index) => {
-      const safeRecord = record as Partial<SessionRecord>;
-      return {
-        id: safeRecord.id || `legacy-${index}`,
-        tabId: safeRecord.tabId || "legacy",
-        projectRoot: safeRecord.projectRoot || null,
-        cwd: safeRecord.cwd || process.cwd(),
-        startedAt: safeRecord.startedAt || new Date(0).toISOString(),
-        endedAt: safeRecord.endedAt,
-        activity: safeRecord.activity || [],
-        idleGaps: safeRecord.idleGaps || [],
-        intent: safeRecord.intent,
-        parkedThoughts: safeRecord.parkedThoughts || [],
-        flowSummary: safeRecord.flowSummary,
-        endReason: safeRecord.endReason
-      };
-    });
-  } catch {
-    const backup = `${SESSIONS_FILE}.${Date.now()}.bak`;
-    try {
-      fs.copyFileSync(SESSIONS_FILE, backup);
-    } catch {
-      // ignore backup errors
-    }
-    return [];
-  }
-}
-
-function saveSessions(sessions: SessionRecord[]) {
-  ensureDataDir();
-  fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), "utf8");
-}
+// data storage handled by SessionManager instance
 
 function findGitRoot(startDir: string): string | null {
   let current = startDir;
@@ -215,10 +167,14 @@ export class SessionManager {
   private state: SessionState;
   private saveTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
+  private dataDir: string;
+  private sessionsFile: string;
 
-  constructor() {
+  constructor(dataDir?: string) {
+    this.dataDir = dataDir || path.join(process.cwd(), "data");
+    this.sessionsFile = path.join(this.dataDir, "sessions.json");
     this.state = {
-      sessions: loadSessions(),
+      sessions: this.loadSessions(),
       tabs: new Map()
     };
   }
@@ -397,6 +353,40 @@ export class SessionManager {
     });
   }
 
+  deleteSession(sessionId: string): boolean {
+    const activeTabId = Array.from(this.state.tabs.entries()).find(
+      ([, tab]) => tab.session.id === sessionId
+    )?.[0];
+    if (activeTabId) {
+      this.endSession(activeTabId, "deleted");
+    }
+    const before = this.state.sessions.length;
+    this.state.sessions = this.state.sessions.filter((session) => session.id !== sessionId);
+    if (this.state.sessions.length !== before) {
+      this.saveSoon(true);
+      return true;
+    }
+    return false;
+  }
+
+  deleteRepoContext(repoKey: string): number {
+    const activeTabIds = Array.from(this.state.tabs.entries())
+      .filter(([, tab]) => (tab.session.projectRoot || tab.session.cwd) === repoKey)
+      .map(([tabId]) => tabId);
+    for (const tabId of activeTabIds) {
+      this.endSession(tabId, "deleted");
+    }
+    const before = this.state.sessions.length;
+    this.state.sessions = this.state.sessions.filter(
+      (session) => (session.projectRoot || session.cwd) !== repoKey
+    );
+    const removed = before - this.state.sessions.length;
+    if (removed > 0) {
+      this.saveSoon(true);
+    }
+    return removed;
+  }
+
   private getOrStart(tabId: string, reason: string) {
     if (!this.state.tabs.has(tabId)) {
       this.startSession(tabId, reason);
@@ -455,7 +445,7 @@ export class SessionManager {
         clearTimeout(this.saveTimer);
         this.saveTimer = null;
       }
-      saveSessions(this.state.sessions);
+      this.saveSessions(this.state.sessions);
       return;
     }
     if (this.saveTimer) {
@@ -463,7 +453,54 @@ export class SessionManager {
     }
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
-      saveSessions(this.state.sessions);
+      this.saveSessions(this.state.sessions);
     }, 2000);
+  }
+
+  private ensureDataDir() {
+    fs.mkdirSync(this.dataDir, { recursive: true });
+  }
+
+  private loadSessions(): SessionRecord[] {
+    try {
+      if (!fs.existsSync(this.sessionsFile)) {
+        return [];
+      }
+      const raw = fs.readFileSync(this.sessionsFile, "utf8");
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed.map((record, index) => {
+        const safeRecord = record as Partial<SessionRecord>;
+        return {
+          id: safeRecord.id || `legacy-${index}`,
+          tabId: safeRecord.tabId || "legacy",
+          projectRoot: safeRecord.projectRoot || null,
+          cwd: safeRecord.cwd || process.cwd(),
+          startedAt: safeRecord.startedAt || new Date(0).toISOString(),
+          endedAt: safeRecord.endedAt,
+          activity: safeRecord.activity || [],
+          idleGaps: safeRecord.idleGaps || [],
+          intent: safeRecord.intent,
+          parkedThoughts: safeRecord.parkedThoughts || [],
+          flowSummary: safeRecord.flowSummary,
+          endReason: safeRecord.endReason
+        };
+      });
+    } catch {
+      const backup = `${this.sessionsFile}.${Date.now()}.bak`;
+      try {
+        fs.copyFileSync(this.sessionsFile, backup);
+      } catch {
+        // ignore backup errors
+      }
+      return [];
+    }
+  }
+
+  private saveSessions(sessions: SessionRecord[]) {
+    this.ensureDataDir();
+    fs.writeFileSync(this.sessionsFile, JSON.stringify(sessions, null, 2), "utf8");
   }
 }

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import { spawn, IPty } from "node-pty";
 import { SessionManager } from "./session";
 
@@ -14,7 +14,7 @@ type TabInfo = {
 
 let mainWindow: BrowserWindow | null = null;
 const tabs = new Map<string, TabInfo>();
-const sessionManager = new SessionManager();
+let sessionManager: SessionManager | null = null;
 
 type ShellKind = "powershell" | "cmd" | "bash" | "zsh" | "fish" | "unknown";
 
@@ -65,7 +65,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
   });
 
@@ -86,6 +87,9 @@ function createWindow() {
 }
 
 function createTab(cwd = process.cwd()) {
+  if (!sessionManager) {
+    throw new Error("Session manager not ready");
+  }
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const { shell, args } = getDefaultShellCommand();
   const shellKind = getShellKind(shell);
@@ -131,6 +135,9 @@ function createTab(cwd = process.cwd()) {
 }
 
 function closeTab(tabId: string, reason: string) {
+  if (!sessionManager) {
+    return;
+  }
   const tab = tabs.get(tabId);
   if (!tab) {
     return;
@@ -160,7 +167,7 @@ ipcMain.handle("select-repo", async () => {
 });
 
 ipcMain.on("pty-write", (_event, tabId: string, data: string) => {
-  sessionManager.recordActivity(tabId, "pty-input");
+  sessionManager?.recordActivity(tabId, "pty-input");
   tabs.get(tabId)?.pty.write(data);
 });
 
@@ -169,27 +176,46 @@ ipcMain.on("pty-resize", (_event, tabId: string, cols: number, rows: number) => 
 });
 
 ipcMain.on("session-intent", (_event, tabId: string, text: string) => {
-  sessionManager.setIntent(tabId, text);
+  sessionManager?.setIntent(tabId, text);
 });
 
 ipcMain.on("session-thought", (_event, tabId: string, text: string) => {
-  sessionManager.addParkedThought(tabId, text);
+  sessionManager?.addParkedThought(tabId, text);
 });
 
 ipcMain.handle("session-get-last", () => {
-  return sessionManager.getLastEndedSession();
+  return sessionManager?.getLastEndedSession() || null;
 });
 
 ipcMain.handle("session-get-active", (_event, tabId: string) => {
-  return sessionManager.getActiveSession(tabId);
+  return sessionManager?.getActiveSession(tabId) || null;
 });
 
 ipcMain.handle("session-get-recent", () => {
-  return sessionManager.getRecentSessions();
+  return sessionManager?.getRecentSessions() || [];
 });
 
 ipcMain.handle("session-get-all", () => {
-  return sessionManager.getAllSessions();
+  return sessionManager?.getAllSessions() || [];
+});
+
+ipcMain.handle("session-delete", (_event, sessionId: string) => {
+  return sessionManager?.deleteSession(sessionId) || false;
+});
+
+ipcMain.handle("session-delete-repo", (_event, repoKey: string) => {
+  return sessionManager?.deleteRepoContext(repoKey) || 0;
+});
+
+ipcMain.handle("app-get-version", () => {
+  return app.getVersion();
+});
+
+ipcMain.handle("app-open-external", (_event, url: string) => {
+  if (!/^https?:\/\//i.test(url)) {
+    return false;
+  }
+  return shell.openExternal(url);
 });
 
 type FileNode = {
@@ -337,6 +363,7 @@ ipcMain.handle("window-is-maximized", (event) => {
 });
 
 app.whenReady().then(() => {
+  sessionManager = new SessionManager(path.join(app.getPath("userData"), "data"));
   createWindow();
 
   app.on("activate", () => {
@@ -347,7 +374,7 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
-  sessionManager.shutdown();
+  sessionManager?.shutdown();
   for (const tab of tabs.values()) {
     tab.pty.kill();
   }

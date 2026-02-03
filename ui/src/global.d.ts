@@ -82,6 +82,10 @@ declare global {
       getActiveSession: (tabId: string) => Promise<SessionRecord | null>;
       getRecentSessions: () => Promise<RecentSession[]>;
       getAllSessions: () => Promise<SessionRecord[]>;
+      deleteSession: (sessionId: string) => Promise<boolean>;
+      deleteRepoContext: (repoKey: string) => Promise<number>;
+      getAppVersion: () => Promise<string>;
+      openExternal: (url: string) => Promise<void>;
       getRepoTree: (tabId: string) => Promise<FileNode | null>;
       readRepoFile: (tabId: string, relPath: string) => Promise<FileReadResult>;
       onPtyData: (callback: (tabId: string, data: string) => void) => () => void;
