@@ -1,102 +1,104 @@
-<div align="center">
-  <img src="assets/Vibeflow%20banner%202X.png" alt="VibeFlow banner" width="860" />
-  <h1 style="margin: 16px 0 6px 0;">VibeFlow</h1>
-  <p style="margin: 0 0 12px 0;">
-    <strong>Supercharge your terminal workflow with context, intent, and flow.</strong>
-  </p>
-  <p style="max-width: 760px; margin: 0 auto 18px auto;">
-    Warp-inspired terminal IDE that captures intent, remembers context, and keeps you in flow.
-  </p>
-  <img src="assets/Vibeflow2X.png" alt="VibeFlow logo" width="72" height="72" />
-</div>
+<p align="center">
+  <img src="assets/Vibeflow2X.png" width="120" alt="VibeFlow logo" />
+</p>
+<h1 align="center">VibeFlow</h1>
+<p align="center"><strong>Supercharged terminal IDE with live context, intent, and flow.</strong></p>
+<p align="center">A focused workspace that blends terminal velocity with session memory.</p>
 
-<hr/>
+<p align="center">
+  <a href="https://github.com/atobouh/vibeflow/releases">
+    <img src="https://img.shields.io/badge/Download-Latest-2ea043?style=for-the-badge" alt="Download latest release" />
+  </a>
+  <a href="cli/README.md">
+    <img src="https://img.shields.io/badge/CLI-Docs-1f6feb?style=for-the-badge" alt="CLI docs" />
+  </a>
+  <a href="RELEASE.md">
+    <img src="https://img.shields.io/badge/Release-Guide-6f42c1?style=for-the-badge" alt="Release guide" />
+  </a>
+</p>
 
-<div align="center">
-  <p>
-    <a href="RELEASE.md" style="text-decoration:none;">
-      <strong>Download Installers</strong>
-    </a>
-    &nbsp;&nbsp;•&nbsp;&nbsp;
-    <a href="cli/README.md" style="text-decoration:none;">
-      <strong>CLI Guide</strong>
-    </a>
-  </p>
-</div>
+<p align="center">
+  <img src="https://img.shields.io/badge/Windows-Supported-2ea043?style=for-the-badge&logo=windows" alt="Windows supported" />
+  <img src="https://img.shields.io/badge/macOS-Supported-2ea043?style=for-the-badge&logo=apple" alt="macOS supported" />
+  <img src="https://img.shields.io/badge/CLI-npm-2ea043?style=for-the-badge&logo=npm" alt="CLI on npm" />
+</p>
 
-<br/>
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/atobouh/vibeflow?style=for-the-badge" alt="Latest release" />
+  <img src="https://img.shields.io/github/downloads/atobouh/vibeflow/total?style=for-the-badge" alt="GitHub downloads" />
+  <img src="https://img.shields.io/github/license/atobouh/vibeflow?style=for-the-badge" alt="License" />
+</p>
 
-## Platform Support
+<p align="center">
+  <img src="assets/Vibeflow%20banner%202X.png" alt="VibeFlow UI" />
+</p>
 
-<table>
-  <tr>
-    <td><i class="fa-brands fa-windows"></i> Windows</td>
-    <td><i class="fa-brands fa-apple"></i> macOS</td>
-    <td><i class="fa-solid fa-terminal"></i> CLI (npm)</td>
-  </tr>
-</table>
+<h2>Why VibeFlow</h2>
 
-## Why VibeFlow
+- Intent-first workflow keeps sessions grounded and focused.
+- Live context panel preserves decisions, commands, and flow state.
+- Warp-inspired layout with tabs, terminal, and contextual sidecar.
+- Local-first sessions for speed, privacy, and offline work.
+- CLI companion for lightweight session tracking anywhere.
 
-<table>
-  <tr>
-    <td width="33%"><i class="fa-solid fa-bolt"></i> Flow-first sessions</td>
-    <td width="33%"><i class="fa-solid fa-bullseye"></i> Intent tracking</td>
-    <td width="33%"><i class="fa-solid fa-note-sticky"></i> Parked thoughts</td>
-  </tr>
-  <tr>
-    <td><i class="fa-solid fa-rotate-left"></i> Resume context</td>
-    <td><i class="fa-solid fa-shield"></i> Local-first data</td>
-    <td><i class="fa-solid fa-layer-group"></i> Multi-tab workflow</td>
-  </tr>
-</table>
-
-## Core Features
-
-- Multi-tab terminal workspace
-- Live Context panel (intent + parked thoughts)
-- Session history with resume
-- Read-only file explorer + preview
-- Command dock for guided input
-- Settings + data controls (delete session or repo context)
-
-## Screens and Flow
+<h2>Desktop App</h2>
 
 <table>
-  <tr>
-    <td width="50%"><i class="fa-solid fa-terminal"></i> Terminal as the hero</td>
-    <td width="50%"><i class="fa-solid fa-list-check"></i> Context on the side</td>
-  </tr>
-  <tr>
-    <td><i class="fa-solid fa-message"></i> Command dock at the bottom</td>
-    <td><i class="fa-solid fa-clock-rotate-left"></i> History + Resume</td>
-  </tr>
+  <thead>
+    <tr>
+      <th align="left">Focus</th>
+      <th align="left">What it delivers</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Session Memory</strong></td>
+      <td>Intent timeline, parked thoughts, and resume-ready context.</td>
+    </tr>
+    <tr>
+      <td><strong>Terminal Control</strong></td>
+      <td>Tabbed workspaces with a clean, modern command surface.</td>
+    </tr>
+    <tr>
+      <td><strong>Flow State</strong></td>
+      <td>Live timer, gentle inactivity handling, and clarity on status.</td>
+    </tr>
+    <tr>
+      <td><strong>History</strong></td>
+      <td>Per-repo sessions with quick resume and clear summaries.</td>
+    </tr>
+  </tbody>
 </table>
 
-## CLI (npm)
+<h2>CLI Companion</h2>
 
-```bash
-npm install -g vibeflow-cli
+<pre><code>npm install -g vibeflow-cli
+
 vf start
-```
+vf intent "Ship the release"
+vf park "Follow up with QA on installer"
+vf status
+vf end
+</code></pre>
 
-## Dev
+<p><strong>Learn more:</strong> <a href="cli/README.md">CLI documentation</a></p>
 
-```bash
-npm install
-npm run dev
-```
+<h2>Tech Stack</h2>
 
-## Build
+<p>
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/electron/electron-original.svg" width="36" alt="Electron" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/typescript/typescript-original.svg" width="36" alt="TypeScript" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/nodejs/nodejs-original.svg" width="36" alt="Node.js" />
+  <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/vscode/vscode-original.svg" width="36" alt="VS Code tooling" />
+</p>
 
-```bash
-npm run build
-```
+<h2>Downloads</h2>
 
-## Release Installers
+- Get the latest Windows and macOS installers from <a href="https://github.com/atobouh/vibeflow/releases">GitHub Releases</a>.
+- Release steps live in <a href="RELEASE.md">RELEASE.md</a>.
 
-See `RELEASE.md` for Windows + macOS installer workflow.
+<h2>Community</h2>
 
-## Credits
-
-Built by Dev Kuns for the Vibeathon. Community: BridgeMind.
+- Built by Dev Kuns for the Vibeathon.
+- GitHub: <a href="https://github.com/atobouh">atobouh</a>
+- BridgeMind: <a href="https://discord.gg/bridgemind">discord.gg/bridgemind</a>

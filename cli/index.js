@@ -38,6 +38,7 @@ const getDataDir = () => {
 const DATA_DIR = getDataDir();
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 const STATE_FILE = path.join(DATA_DIR, "state.json");
+const DEFAULT_IDLE_MINUTES = 240;
 
 const ensureDir = () => {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -70,12 +71,17 @@ const saveSessions = (sessions) => {
 };
 
 const loadState = () => {
-  const data = loadJson(STATE_FILE, { activeByRepo: {} });
+  const data = loadJson(STATE_FILE, {
+    activeByRepo: {},
+    idleTimeoutMinutes: DEFAULT_IDLE_MINUTES
+  });
   if (!data || typeof data !== "object") {
-    return { activeByRepo: {} };
+    return { activeByRepo: {}, idleTimeoutMinutes: DEFAULT_IDLE_MINUTES };
   }
   return {
-    activeByRepo: data.activeByRepo || {}
+    activeByRepo: data.activeByRepo || {},
+    idleTimeoutMinutes:
+      typeof data.idleTimeoutMinutes === "number" ? data.idleTimeoutMinutes : DEFAULT_IDLE_MINUTES
   };
 };
 
@@ -184,6 +190,8 @@ Usage:
   vf status              Show current session status
   vf status --watch      Live session timer
   vf timer               Live session timer (alias)
+  vf idle [value]        Get/set idle timeout (minutes or Nh)
+  vf touch               Refresh activity timestamp
   vf resume [path]       Show last session summary
   vf history [path]      List recent sessions
   vf end                 End current session
@@ -206,19 +214,54 @@ const printSessionSummary = (session, active = false) => {
   }
   console.log(`Duration: ${formatDuration(durationMs)}`);
   console.log(`Intent: ${session.intent?.text || "Not set"}`);
-  console.log(`Parked: ${session.parkedThoughts.length}`);
+  console.log(`Parked: ${(session.parkedThoughts || []).length}`);
+};
+
+const getIdleTimeoutMs = (state) => {
+  const minutes =
+    typeof state.idleTimeoutMinutes === "number" ? state.idleTimeoutMinutes : DEFAULT_IDLE_MINUTES;
+  if (minutes <= 0) {
+    return 0;
+  }
+  return minutes * 60 * 1000;
+};
+
+const normalizeSession = (session) => {
+  if (!session.lastActivityAt) {
+    session.lastActivityAt = session.startedAt;
+  }
+  if (!session.parkedThoughts) {
+    session.parkedThoughts = [];
+  }
+  return session;
 };
 
 const ensureActiveSession = (sessions, state, repoKey) => {
   const activeId = state.activeByRepo[repoKey];
   if (!activeId) {
-    return null;
+    return { session: null, autoEnded: false, endedSession: null };
   }
   const session = findSessionById(sessions, activeId);
-  return session || null;
+  if (!session) {
+    return { session: null, autoEnded: false, endedSession: null };
+  }
+  normalizeSession(session);
+  const timeoutMs = getIdleTimeoutMs(state);
+  if (timeoutMs > 0) {
+    const last = Date.parse(session.lastActivityAt || session.startedAt);
+    if (Date.now() - last > timeoutMs) {
+      session.endedAt = nowIso();
+      session.endedReason = "idle";
+      saveSessions(sessions);
+      delete state.activeByRepo[repoKey];
+      saveState(state);
+      return { session: null, autoEnded: true, endedSession: session };
+    }
+  }
+  return { session, autoEnded: false, endedSession: null };
 };
 
-const startSession = (targetPath) => {
+const startSession = (targetPath, watch) => {
   const cwd = targetPath ? path.resolve(targetPath) : process.cwd();
   const repoKey = getRepoKey(cwd);
   const repoName = path.basename(repoKey);
@@ -226,9 +269,9 @@ const startSession = (targetPath) => {
   const state = loadState();
 
   const existing = ensureActiveSession(sessions, state, repoKey);
-  if (existing && !existing.endedAt) {
+  if (existing.session && !existing.session.endedAt) {
     console.log(c.yellow("Session already active:"));
-    printSessionSummary(existing, true);
+    printSessionSummary(existing.session, true);
     return;
   }
 
@@ -238,6 +281,7 @@ const startSession = (targetPath) => {
     repoName,
     cwd,
     startedAt: nowIso(),
+    lastActivityAt: nowIso(),
     parkedThoughts: []
   };
 
@@ -258,7 +302,11 @@ const startSession = (targetPath) => {
   console.log(c.dim("Terminal IDE - Intent - Context - Flow\n"));
   console.log(c.green("Session started."));
   printSessionSummary(session, true);
-  renderLiveTimer(session);
+  if (watch) {
+    renderLiveTimer(session);
+    return;
+  }
+  console.log(c.gray("Live timer: run `vf timer` when you want a live view."));
 };
 
 const setIntent = (text) => {
@@ -270,12 +318,18 @@ const setIntent = (text) => {
   const repoKey = getRepoKey(process.cwd());
   const sessions = loadSessions();
   const state = loadState();
-  const session = ensureActiveSession(sessions, state, repoKey);
-  if (!session) {
+  const active = ensureActiveSession(sessions, state, repoKey);
+  if (!active.session) {
+    if (active.autoEnded) {
+      console.error("Session auto-ended due to inactivity. Run `vf start` to begin a new one.");
+      printSessionSummary(active.endedSession, false);
+      return;
+    }
     console.error("No active session. Run `vf start` first.");
     return;
   }
-  session.intent = { text: value, setAt: nowIso() };
+  active.session.intent = { text: value, setAt: nowIso() };
+  active.session.lastActivityAt = nowIso();
   saveSessions(sessions);
   console.log("Intent saved.");
 };
@@ -289,14 +343,30 @@ const parkThought = (text) => {
   const repoKey = getRepoKey(process.cwd());
   const sessions = loadSessions();
   const state = loadState();
-  const session = ensureActiveSession(sessions, state, repoKey);
-  if (!session) {
+  const active = ensureActiveSession(sessions, state, repoKey);
+  if (!active.session) {
+    if (active.autoEnded) {
+      console.error("Session auto-ended due to inactivity. Run `vf start` to begin a new one.");
+      printSessionSummary(active.endedSession, false);
+      return;
+    }
     console.error("No active session. Run `vf start` first.");
     return;
   }
-  session.parkedThoughts.push({ text: value, createdAt: nowIso() });
+  active.session.parkedThoughts.push({ text: value, createdAt: nowIso() });
+  active.session.lastActivityAt = nowIso();
   saveSessions(sessions);
   console.log("Thought parked.");
+};
+
+const printBigTimeOnce = (elapsed) => {
+  const lines = renderBigTime(elapsed);
+  const tinted = lines.map((line, idx) => {
+    if (idx < 2) return c.cyan(line);
+    if (idx < 4) return c.blue(line);
+    return c.magenta(line);
+  });
+  console.log(tinted.join("\n"));
 };
 
 const renderLiveTimer = (session) => {
@@ -330,13 +400,20 @@ const status = (watch = false) => {
   const repoKey = getRepoKey(process.cwd());
   const sessions = loadSessions();
   const state = loadState();
-  const session = ensureActiveSession(sessions, state, repoKey);
-  if (session) {
+  const active = ensureActiveSession(sessions, state, repoKey);
+  if (active.session) {
     if (watch) {
-      renderLiveTimer(session);
+      active.session.lastActivityAt = nowIso();
+      saveSessions(sessions);
+      renderLiveTimer(active.session);
       return;
     }
-    printSessionSummary(session, true);
+    printSessionSummary(active.session, true);
+    return;
+  }
+  if (active.autoEnded && active.endedSession) {
+    console.log(c.yellow("Session auto-ended due to inactivity."));
+    printSessionSummary(active.endedSession, false);
     return;
   }
   const last = getLastSessionForRepo(sessions, repoKey);
@@ -354,9 +431,14 @@ const resume = (targetPath) => {
   const sessions = loadSessions();
   const state = loadState();
   const active = ensureActiveSession(sessions, state, repoKey);
-  if (active) {
+  if (active.session) {
     console.log("Active session:");
-    printSessionSummary(active, true);
+    printSessionSummary(active.session, true);
+    return;
+  }
+  if (active.autoEnded && active.endedSession) {
+    console.log("Last session (auto-ended due to inactivity):");
+    printSessionSummary(active.endedSession, false);
     return;
   }
   const last = getLastSessionForRepo(sessions, repoKey);
@@ -396,17 +478,22 @@ const end = () => {
   const repoKey = getRepoKey(process.cwd());
   const sessions = loadSessions();
   const state = loadState();
-  const session = ensureActiveSession(sessions, state, repoKey);
-  if (!session) {
+  const active = ensureActiveSession(sessions, state, repoKey);
+  if (!active.session) {
+    if (active.autoEnded) {
+      console.error("Session already auto-ended due to inactivity.");
+      printSessionSummary(active.endedSession, false);
+      return;
+    }
     console.error("No active session to end.");
     return;
   }
-  session.endedAt = nowIso();
+  active.session.endedAt = nowIso();
   saveSessions(sessions);
   delete state.activeByRepo[repoKey];
   saveState(state);
   console.log("Session ended.");
-  printSessionSummary(session, false);
+  printSessionSummary(active.session, false);
   process.exit(0);
 };
 
@@ -435,12 +522,96 @@ const receipt = (id) => {
     : Date.now() - Date.parse(session.startedAt);
   console.log(`Duration: ${formatDuration(durationMs)}`);
   console.log(`Intent: ${session.intent?.text || "Not set"}`);
-  console.log(`Parked: ${session.parkedThoughts.length}`);
+  console.log(`Parked: ${(session.parkedThoughts || []).length}`);
+};
+
+const parseIdleMinutes = (value) => {
+  if (!value) {
+    return null;
+  }
+  const cleaned = value.trim().toLowerCase();
+  if (cleaned === "off" || cleaned === "disable" || cleaned === "0") {
+    return 0;
+  }
+  const match = cleaned.match(/^(\d+)(h|m)?$/);
+  if (!match) {
+    return null;
+  }
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+  if (match[2] === "h") {
+    return amount * 60;
+  }
+  return amount;
+};
+
+const setIdle = (value) => {
+  const state = loadState();
+  if (!value) {
+    const current = getIdleTimeoutMs(state);
+    if (current === 0) {
+      console.log("Idle timeout: disabled");
+      return;
+    }
+    console.log(`Idle timeout: ${state.idleTimeoutMinutes} minutes`);
+    return;
+  }
+  const minutes = parseIdleMinutes(value);
+  if (minutes === null) {
+    console.error("Invalid idle timeout. Use minutes (e.g. 90) or hours (e.g. 4h) or 'off'.");
+    return;
+  }
+  state.idleTimeoutMinutes = minutes;
+  saveState(state);
+  if (minutes === 0) {
+    console.log("Idle timeout disabled.");
+    return;
+  }
+  console.log(`Idle timeout set to ${minutes} minutes.`);
+};
+
+const touch = () => {
+  const repoKey = getRepoKey(process.cwd());
+  const sessions = loadSessions();
+  const state = loadState();
+  const active = ensureActiveSession(sessions, state, repoKey);
+  if (!active.session) {
+    if (active.autoEnded) {
+      console.error("Session auto-ended due to inactivity.");
+      printSessionSummary(active.endedSession, false);
+      return;
+    }
+    console.error("No active session. Run `vf start` first.");
+    return;
+  }
+  active.session.lastActivityAt = nowIso();
+  saveSessions(sessions);
+  console.log("Session activity refreshed.");
+};
+
+const parseStartArgs = (values) => {
+  let watch = false;
+  let targetPath = null;
+  for (const arg of values) {
+    if (arg === "--watch" || arg === "--timer") {
+      watch = true;
+      continue;
+    }
+    if (!targetPath) {
+      targetPath = arg;
+    }
+  }
+  return { watch, targetPath };
 };
 
 switch (command) {
   case "start":
-    startSession(args[1]);
+    {
+      const parsed = parseStartArgs(args.slice(1));
+      startSession(parsed.targetPath, parsed.watch);
+    }
     break;
   case "intent":
     setIntent(args.slice(1).join(" "));
@@ -459,6 +630,12 @@ switch (command) {
     break;
   case "history":
     history(args[1]);
+    break;
+  case "idle":
+    setIdle(args[1]);
+    break;
+  case "touch":
+    touch();
     break;
   case "end":
     end();
