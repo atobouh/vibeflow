@@ -35,7 +35,20 @@ type SessionRecord = {
   }>;
   flowSummary?: FlowSummary;
   endReason?: string;
+  idleForMs?: number;
+  paused?: boolean;
 };
+
+type FileNode = {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  children?: FileNode[];
+};
+
+type FileReadResult =
+  | { ok: true; content: string }
+  | { ok: false; message: string };
 
 type TabCreateResult = {
   id: string;
@@ -69,6 +82,8 @@ declare global {
       getActiveSession: (tabId: string) => Promise<SessionRecord | null>;
       getRecentSessions: () => Promise<RecentSession[]>;
       getAllSessions: () => Promise<SessionRecord[]>;
+      getRepoTree: (tabId: string) => Promise<FileNode | null>;
+      readRepoFile: (tabId: string, relPath: string) => Promise<FileReadResult>;
       onPtyData: (callback: (tabId: string, data: string) => void) => () => void;
       onPtyExit: (callback: (tabId: string) => void) => () => void;
       windowControl: (action: "minimize" | "maximize" | "restore" | "close") => void;

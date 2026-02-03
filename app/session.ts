@@ -42,6 +42,8 @@ export type SessionRecord = {
   parkedThoughts: ParkedThought[];
   flowSummary?: FlowSummary;
   endReason?: string;
+  idleForMs?: number;
+  paused?: boolean;
 };
 
 export type RecentSession = {
@@ -67,7 +69,7 @@ type SessionState = {
 const DATA_DIR = path.join(process.cwd(), "data");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 
-const IDLE_GAP_THRESHOLD_MS = 2 * 60 * 1000;
+const IDLE_GAP_THRESHOLD_MS = 5 * 60 * 1000;
 const AUTO_END_THRESHOLD_MS = 10 * 60 * 1000;
 const ACTIVITY_SAMPLE_MS = 1000;
 const DEEP_FLOW_THRESHOLD_MS = 15 * 60 * 1000;
@@ -337,9 +339,13 @@ export class SessionManager {
       return null;
     }
     const now = Date.now();
+    const idleForMs = Math.max(0, now - tab.lastActivityAt);
+    const paused = idleForMs >= IDLE_GAP_THRESHOLD_MS;
     return {
       ...tab.session,
-      flowSummary: computeFlowSummary(tab.session, now)
+      flowSummary: computeFlowSummary(tab.session, now),
+      idleForMs,
+      paused
     };
   }
 

@@ -24,6 +24,12 @@ type ShellKind = "powershell" | "cmd" | "bash" | "zsh" | "fish" | "unknown";
 
 const terminalStack = document.getElementById("terminal-stack");
 const terminalShell = document.getElementById("terminal-container");
+const toolPanel = document.getElementById("tool-panel");
+const fileTree = document.getElementById("vf-file-tree");
+const filePath = document.getElementById("vf-file-path");
+const fileContent = document.getElementById("vf-file-content");
+const fileRefresh = document.getElementById("vf-files-refresh");
+const fileToggle = document.getElementById("vf-files-toggle");
 const tabsContainer = document.getElementById("tab-container");
 const tabAddButton = document.getElementById("vf-tab-add");
 const contextPanel = document.getElementById("context-panel");
@@ -83,9 +89,29 @@ const receiptCopy = document.getElementById("vf-receipt-copy");
 const receiptClose = document.getElementById("vf-receipt-close");
 const receiptNew = document.getElementById("vf-receipt-new");
 
+const DEBUG_UI = (() => {
+  try {
+    return localStorage.getItem("vf-debug") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+const logUi = (...args: unknown[]) => {
+  if (DEBUG_UI) {
+    console.log("[vibeflow-ui]", ...args);
+  }
+};
+
 if (
   !terminalStack ||
   !terminalShell ||
+  !toolPanel ||
+  !fileTree ||
+  !filePath ||
+  !fileContent ||
+  !fileRefresh ||
+  !fileToggle ||
   !tabsContainer ||
   !tabAddButton ||
   !contextPanel ||
@@ -151,21 +177,37 @@ let receiptText = "";
 let audioEnabled = true;
 let audioContext: AudioContext | null = null;
 let flashTimer: number | null = null;
-let idleTabVisible = false;
+const isIdleScreenOpen = () => welcomePane.classList.contains("is-open");
 let chatIsCollapsed = false;
 let settingsAudioInput: HTMLInputElement | null = null;
 let historyRepoList: HTMLElement | null = null;
 let historySessionList: HTMLElement | null = null;
-let historyDetailsBody: HTMLElement | null = null;
 let historySelectedRepo: string | null = null;
 let historySessionsCache: SessionRecord[] = [];
+let openHistorySessionId: string | null = null;
+let toolPanelCollapsed = false;
+
+const setTerminalStdin = (term: Terminal, enabled: boolean) => {
+  const termAny = term as unknown as {
+    setOption?: (key: string, value: boolean) => void;
+    options?: { disableStdin?: boolean };
+  };
+  if (typeof termAny.setOption === "function") {
+    termAny.setOption("disableStdin", !enabled);
+    return;
+  }
+  if (!termAny.options) {
+    termAny.options = {};
+  }
+  termAny.options.disableStdin = !enabled;
+};
 
 const setTerminalInputEnabled = (enabled: boolean) => {
   const tab = activeTabId ? tabs.get(activeTabId) : null;
   if (!tab || tab.kind !== "terminal" || !tab.term) {
     return;
   }
-  tab.term.setOption("disableStdin", !enabled);
+  setTerminalStdin(tab.term, enabled);
   if (enabled) {
     tab.term.focus();
   }
@@ -417,6 +459,46 @@ const renderSettingsPane = (container: HTMLDivElement) => {
           </div>
         </div>
         <div class="panel-card">
+          <h3>Commands</h3>
+          <div class="settings-list">
+            <div class="settings-command">
+              <div class="settings-command-text">
+                <div class="settings-command-title">Open repository</div>
+                <div class="settings-command-hint">Choose a folder to start or resume a session.</div>
+              </div>
+              <kbd>Ctrl+O</kbd>
+            </div>
+            <div class="settings-command">
+              <div class="settings-command-text">
+                <div class="settings-command-title">Set intent</div>
+                <div class="settings-command-hint">Capture the current session goal in one sentence.</div>
+              </div>
+              <kbd>Alt+I</kbd>
+            </div>
+            <div class="settings-command">
+              <div class="settings-command-text">
+                <div class="settings-command-title">Park thought</div>
+                <div class="settings-command-hint">Save a quick note without breaking flow.</div>
+              </div>
+              <kbd>Alt+P</kbd>
+            </div>
+            <div class="settings-command">
+              <div class="settings-command-text">
+                <div class="settings-command-title">Send command</div>
+                <div class="settings-command-hint">Runs the command from the chat dock.</div>
+              </div>
+              <kbd>Enter</kbd>
+            </div>
+            <div class="settings-command">
+              <div class="settings-command-text">
+                <div class="settings-command-title">Save intent (terminal)</div>
+                <div class="settings-command-hint">Uses the current terminal line as intent.</div>
+              </div>
+              <kbd>Button</kbd>
+            </div>
+          </div>
+        </div>
+        <div class="panel-card">
           <h3>Session Trust</h3>
           <div class="settings-hint">All session data is stored locally on this device.</div>
         </div>
@@ -433,6 +515,112 @@ const renderSettingsPane = (container: HTMLDivElement) => {
   });
 };
 
+const setToolPanelVisible = (visible: boolean) => {
+  logUi("toolPanelVisible", { visible });
+  toolPanel.style.display = visible ? "flex" : "none";
+};
+
+const setToolPanelCollapsed = (collapsed: boolean) => {
+  toolPanelCollapsed = collapsed;
+  logUi("toolPanelCollapsed", { collapsed });
+  toolPanel.classList.toggle("collapsed", collapsed);
+  const icon = fileToggle.querySelector("i");
+  if (icon) {
+    icon.className = collapsed ? "fa-solid fa-chevron-right" : "fa-solid fa-chevron-left";
+  }
+};
+
+const renderFileTree = (node: FileNode | null) => {
+  fileTree.innerHTML = "";
+  if (!node || !node.children || node.children.length === 0) {
+    fileTree.innerHTML = "<div class=\"history-empty\" style=\"padding: 8px 12px;\">No files found.</div>";
+    return;
+  }
+
+  const buildNode = (item: FileNode, depth: number) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "tool-node";
+
+    const row = document.createElement("div");
+    row.className = `tool-item ${item.type}`;
+    row.style.paddingLeft = `${12 + depth * 12}px`;
+
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.innerHTML = item.type === "dir" ? "<i class=\"fa-solid fa-folder\"></i>" : "<i class=\"fa-regular fa-file\"></i>";
+
+    const label = document.createElement("span");
+    label.textContent = item.name;
+
+    row.appendChild(icon);
+    row.appendChild(label);
+    wrapper.appendChild(row);
+
+    if (item.type === "dir") {
+      const childrenWrap = document.createElement("div");
+      childrenWrap.className = "tool-children";
+      if (depth >= 2) {
+        childrenWrap.classList.add("collapsed");
+      }
+      row.addEventListener("click", () => {
+        childrenWrap.classList.toggle("collapsed");
+      });
+      if (item.children && item.children.length > 0) {
+        for (const child of item.children) {
+          childrenWrap.appendChild(buildNode(child, depth + 1));
+        }
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "history-item-meta";
+        empty.style.paddingLeft = `${24 + depth * 12}px`;
+        empty.textContent = "Empty folder";
+        childrenWrap.appendChild(empty);
+      }
+      wrapper.appendChild(childrenWrap);
+    } else {
+      row.addEventListener("click", () => {
+        void openFilePreview(item.path);
+      });
+    }
+
+    return wrapper;
+  };
+
+  for (const child of node.children) {
+    fileTree.appendChild(buildNode(child, 0));
+  }
+};
+
+const openFilePreview = async (relPath: string) => {
+  if (!activeTabId) {
+    return;
+  }
+  filePath.textContent = relPath || "File preview";
+  fileContent.textContent = "Loading...";
+  const result = await window.vibeflow.readRepoFile(activeTabId, relPath);
+  if (result.ok) {
+    fileContent.textContent = result.content;
+  } else {
+    fileContent.textContent = result.message;
+  }
+};
+
+const loadRepoTree = async () => {
+  if (!activeTabId) {
+    fileTree.innerHTML = "";
+    filePath.textContent = "No file selected";
+    fileContent.textContent = "Select a file to preview.";
+    return;
+  }
+  const tab = tabs.get(activeTabId);
+  if (!tab || tab.kind !== "terminal") {
+    return;
+  }
+  fileTree.innerHTML = "<div class=\"history-empty\" style=\"padding: 8px 12px;\">Loading...</div>";
+  const tree = await window.vibeflow.getRepoTree(activeTabId);
+  renderFileTree(tree);
+};
+
 const renderHistoryPane = (container: HTMLDivElement) => {
   container.innerHTML = `
     <div class="panel-pane">
@@ -447,34 +635,29 @@ const renderHistoryPane = (container: HTMLDivElement) => {
           <h3>Repos</h3>
           <div id="vf-history-repos" class="history-list"></div>
         </div>
-        <div class="history-right">
-          <div class="panel-card">
-            <h3>Sessions</h3>
-            <div id="vf-history-sessions" class="history-list"></div>
-          </div>
-          <div class="panel-card history-details">
-            <h3>Session Details</h3>
-            <div id="vf-history-details" class="history-details-body"></div>
-          </div>
+        <div class="panel-card">
+          <h3>Sessions</h3>
+          <div id="vf-history-sessions" class="history-list"></div>
         </div>
       </div>
     </div>
   `;
   historyRepoList = container.querySelector("#vf-history-repos");
   historySessionList = container.querySelector("#vf-history-sessions");
-  historyDetailsBody = container.querySelector("#vf-history-details");
 };
 
 const openSpecialTab = (kind: "settings" | "history") => {
   const spec = specialTabs[kind];
   const existing = tabs.get(spec.id);
   if (existing) {
-    setActiveTab(existing.id);
+    logUi("openSpecialTab-existing", { kind, tabId: existing.id });
+    setActiveTab(existing.id, "open-special-tab-existing");
     if (kind === "history") {
       void refreshHistory();
     }
     return;
   }
+  logUi("openSpecialTab-create", { kind, tabId: spec.id });
   const container = document.createElement("div");
   container.className = "terminal-pane";
   container.dataset.tabId = spec.id;
@@ -494,7 +677,7 @@ const openSpecialTab = (kind: "settings" | "history") => {
     chat: []
   });
   renderTabs();
-  setActiveTab(spec.id);
+  setActiveTab(spec.id, "open-special-tab");
   if (kind === "history") {
     void refreshHistory();
   }
@@ -645,7 +828,12 @@ const fitActiveTerminal = () => {
 
 const renderTabs = () => {
   tabsContainer.innerHTML = "";
-  const showPlaceholder = tabs.size === 0 || idleTabVisible;
+  logUi("renderTabs", {
+    count: tabs.size,
+    activeTabId,
+    idleOpen: isIdleScreenOpen(),
+    tabs: Array.from(tabs.values()).map((tab) => ({ id: tab.id, title: tab.title, kind: tab.kind }))
+  });
   for (const tab of tabs.values()) {
     const button = document.createElement("button");
     button.className = "tab no-drag";
@@ -678,42 +866,35 @@ const renderTabs = () => {
     button.appendChild(icon);
     button.appendChild(title);
     button.appendChild(close);
-    button.addEventListener("click", () => setActiveTab(tab.id));
+    button.addEventListener("click", () => setActiveTab(tab.id, "tab-click"));
     tabsContainer.appendChild(button);
-  }
-  if (showPlaceholder) {
-    const placeholder = document.createElement("button");
-    placeholder.className = "tab placeholder no-drag";
-    placeholder.type = "button";
-    placeholder.textContent = "Select repository";
-    if (!activeTabId) {
-      placeholder.classList.add("active");
-    }
-    placeholder.addEventListener("click", () => {
-      void selectRepoAndCreateTab();
-    });
-    tabsContainer.appendChild(placeholder);
   }
 };
 
-const setActiveTab = (tabId: string) => {
+const setActiveTab = (tabId: string, source = "unknown") => {
   const nextTab = tabs.get(tabId);
   if (!nextTab) {
+    logUi("setActiveTab-missing", { tabId, activeTabId, tabs: Array.from(tabs.keys()) });
     return;
   }
   const previousTab = activeTabId ? tabs.get(activeTabId) : null;
+  logUi("setActiveTab", { source, from: previousTab?.id, to: tabId });
   activeTabId = tabId;
-  idleTabVisible = false;
   for (const tab of tabs.values()) {
     tab.container.classList.toggle("active", tab.id === tabId);
   }
   welcomePane.classList.remove("is-open");
   quickIntent.style.display = nextTab.kind === "terminal" ? "inline-flex" : "none";
   if (previousTab?.kind === "terminal" && previousTab.term && nextTab.kind !== "terminal") {
-    previousTab.term.setOption("disableStdin", true);
+    setTerminalStdin(previousTab.term, false);
   }
   if (nextTab.kind === "terminal") {
+    setToolPanelVisible(true);
+    setToolPanelCollapsed(toolPanelCollapsed);
+    void loadRepoTree();
     setTerminalInputEnabled(chatIsCollapsed);
+  } else {
+    setToolPanelVisible(false);
   }
   renderTabs();
   renderChat();
@@ -728,6 +909,7 @@ const setActiveTab = (tabId: string) => {
 };
 
 const createTab = async (cwd?: string) => {
+  logUi("createTab", { cwd });
   const tabInfo = await window.vibeflow.createTab(cwd);
   const container = document.createElement("div");
   container.className = "terminal-pane";
@@ -779,7 +961,7 @@ const createTab = async (cwd?: string) => {
   });
 
   renderTabs();
-  setActiveTab(tabInfo.id);
+  setActiveTab(tabInfo.id, "createTab");
   welcomePane.classList.remove("is-open");
 };
 
@@ -788,6 +970,7 @@ const removeTabLocal = (tabId: string) => {
   if (!tab) {
     return;
   }
+  logUi("removeTabLocal", { tabId, activeTabId });
   if (tab.kind === "terminal" && tab.term) {
     tab.term.dispose();
   }
@@ -797,7 +980,7 @@ const removeTabLocal = (tabId: string) => {
   if (activeTabId === tabId) {
     const remaining = Array.from(tabs.keys());
     if (remaining.length > 0) {
-      setActiveTab(remaining[0]);
+      setActiveTab(remaining[0], "removeTabLocal");
     } else {
       showIdleState();
     }
@@ -807,6 +990,7 @@ const removeTabLocal = (tabId: string) => {
 };
 
 const closeTab = async (tabId: string) => {
+  logUi("closeTab", { tabId });
   const session = await window.vibeflow.getActiveSession(tabId);
   await window.vibeflow.closeTab(tabId);
   removeTabLocal(tabId);
@@ -819,25 +1003,26 @@ const closeTab = async (tabId: string) => {
 };
 
 const selectRepoAndCreateTab = async () => {
+  logUi("selectRepoAndCreateTab");
   const selected = await window.vibeflow.selectRepo();
   if (!selected) {
     return;
   }
-  idleTabVisible = false;
   await createTab(selected);
 };
 
 const showIdleState = () => {
+  logUi("showIdleState", { activeTabId });
   const previous = activeTabId ? tabs.get(activeTabId) : null;
   if (previous?.kind === "terminal" && previous.term) {
-    previous.term.setOption("disableStdin", true);
+    setTerminalStdin(previous.term, false);
   }
   activeTabId = null;
-  idleTabVisible = true;
   for (const tab of tabs.values()) {
     tab.container.classList.remove("active");
   }
   quickIntent.style.display = "none";
+  setToolPanelVisible(false);
   welcomePane.classList.add("is-open");
   renderTabs();
   renderChat();
@@ -999,19 +1184,17 @@ const refreshRecentRepos = async () => {
 };
 
 const refreshHistory = async () => {
-  if (!historyRepoList || !historySessionList || !historyDetailsBody) {
+  if (!historyRepoList || !historySessionList) {
     return;
   }
   const sessions: SessionList = await window.vibeflow.getAllSessions();
   historySessionsCache = sessions.filter((session) => session.endedAt);
   historyRepoList.innerHTML = "";
   historySessionList.innerHTML = "";
-  historyDetailsBody.innerHTML = "";
 
   if (historySessionsCache.length === 0) {
     historyRepoList.innerHTML = "<div class=\"history-item\">No sessions yet.</div>";
     historySessionList.innerHTML = "<div class=\"history-item\">No sessions yet.</div>";
-    historyDetailsBody.innerHTML = "<div class=\"history-empty\">No session selected.</div>";
     return;
   }
 
@@ -1071,6 +1254,7 @@ const refreshHistory = async () => {
     item.appendChild(metaLine);
     item.addEventListener("click", () => {
       historySelectedRepo = key;
+      openHistorySessionId = null;
       void refreshHistory();
     });
     historyRepoList.appendChild(item);
@@ -1099,11 +1283,10 @@ const refreshHistory = async () => {
 };
 
 const renderHistoryLists = () => {
-  if (!historySessionList || !historyDetailsBody) {
+  if (!historySessionList) {
     return;
   }
   historySessionList.innerHTML = "";
-  historyDetailsBody.innerHTML = "<div class=\"history-empty\">Select a session to view details.</div>";
 
   const selectedKey = historySelectedRepo || "__all__";
   const sessions = historySessionsCache
@@ -1140,9 +1323,10 @@ const renderHistoryLists = () => {
     const actions = document.createElement("div");
     actions.className = "history-actions";
     const detailsButton = document.createElement("button");
-    detailsButton.textContent = "View details";
+    detailsButton.textContent = openHistorySessionId === session.id ? "Hide details" : "View details";
     detailsButton.addEventListener("click", () => {
-      renderHistoryDetails(session);
+      openHistorySessionId = openHistorySessionId === session.id ? null : session.id;
+      renderHistoryLists();
       playClick();
     });
     const resumeButton = document.createElement("button");
@@ -1158,14 +1342,19 @@ const renderHistoryLists = () => {
     item.appendChild(meta);
     item.appendChild(intent);
     item.appendChild(actions);
+
+    if (openHistorySessionId === session.id) {
+      const details = renderHistoryDetailsInline(session);
+      item.appendChild(details);
+    }
+
     historySessionList.appendChild(item);
   }
 };
 
-const renderHistoryDetails = (session: SessionRecord) => {
-  if (!historyDetailsBody) {
-    return;
-  }
+const renderHistoryDetailsInline = (session: SessionRecord) => {
+  const wrapper = document.createElement("div");
+  wrapper.className = "history-details-inline";
   const flowLabel = flowLabelText[session.flowSummary?.label || "steady"];
   const duration = formatDuration(session.flowSummary?.sessionDurationMs || 0);
   const parked = session.parkedThoughts || [];
@@ -1178,29 +1367,43 @@ const renderHistoryDetails = (session: SessionRecord) => {
     `Idle: ${formatDuration(session.flowSummary?.totalIdleMs || 0)}`
   ];
 
-  historyDetailsBody.innerHTML = `
-    <div class="history-details-row">
-      <div class="history-details-label">Summary</div>
-      <div>${titleFromPath(session.projectRoot, session.cwd)} • ${duration}</div>
-      <div class="history-tags">
-        ${tags.map((tag) => `<span class="history-tag">${tag}</span>`).join("")}
+  wrapper.innerHTML = `
+    <div class="history-details-body">
+      <div class="history-details-row">
+        <div class="history-details-label">Summary</div>
+        <div>${titleFromPath(session.projectRoot, session.cwd)} • ${duration}</div>
+        <div class="history-tags">
+          ${tags.map((tag) => `<span class="history-tag">${tag}</span>`).join("")}
+        </div>
+      </div>
+      <div class="history-details-row">
+        <div class="history-details-label">Intent</div>
+        <div>${intentText}</div>
+        <div class="history-item-meta">Set at ${intentTime}</div>
+      </div>
+      <div class="history-details-row">
+        <div class="history-details-label">Parked Thoughts</div>
+        <div class="history-item-meta">${
+          parked.length ? "" : "No parked thoughts were recorded."
+        }</div>
+        <div class="history-tags">
+          ${parked.slice(0, 6).map((p) => `<span class="history-tag">${p.text}</span>`).join("")}
+        </div>
       </div>
     </div>
-    <div class="history-details-row">
-      <div class="history-details-label">Intent</div>
-      <div>${intentText}</div>
-      <div class="history-item-meta">Set at ${intentTime}</div>
-    </div>
-    <div class="history-details-row">
-      <div class="history-details-label">Parked Thoughts</div>
-      <div class="history-item-meta">${
-        parked.length ? "" : "No parked thoughts were recorded."
-      }</div>
-      <div class="history-tags">
-        ${parked.slice(0, 6).map((p) => `<span class="history-tag">${p.text}</span>`).join("")}
-      </div>
+    <div class="history-details-close">
+      <button type="button">Dismiss</button>
     </div>
   `;
+
+  const dismiss = wrapper.querySelector("button");
+  dismiss?.addEventListener("click", () => {
+    openHistorySessionId = null;
+    renderHistoryLists();
+    playClick();
+  });
+
+  return wrapper;
 };
 
 const sendChatCommand = () => {
@@ -1387,21 +1590,27 @@ const refreshContext = async () => {
   const summary = session.flowSummary;
   if (summary) {
     contextFlowTime.textContent = formatClock(summary.sessionDurationMs);
-    contextFlowLabel.textContent = flowLabelText[summary.label] || "Steady";
-    const flowColor =
-      summary.label === "deep-flow"
-        ? "#4ade80"
-        : summary.label === "drift"
-        ? "#facc15"
-        : summary.label === "context-loss"
-        ? "#f87171"
-        : "#9ca3af";
-    contextFlowLabel.style.color = flowColor;
-    const ratio =
-      summary.sessionDurationMs > 0
-        ? Math.min(1, summary.totalActiveMs / summary.sessionDurationMs)
-        : 0.2;
-    contextFlowBar.style.width = `${Math.max(10, Math.round(ratio * 100))}%`;
+    if (session.paused) {
+      contextFlowLabel.textContent = "Paused";
+      contextFlowLabel.style.color = "#94a3b8";
+      contextFlowBar.style.width = "10%";
+    } else {
+      contextFlowLabel.textContent = flowLabelText[summary.label] || "Steady";
+      const flowColor =
+        summary.label === "deep-flow"
+          ? "#4ade80"
+          : summary.label === "drift"
+          ? "#facc15"
+          : summary.label === "context-loss"
+          ? "#f87171"
+          : "#9ca3af";
+      contextFlowLabel.style.color = flowColor;
+      const ratio =
+        summary.sessionDurationMs > 0
+          ? Math.min(1, summary.totalActiveMs / summary.sessionDurationMs)
+          : 0.2;
+      contextFlowBar.style.width = `${Math.max(10, Math.round(ratio * 100))}%`;
+    }
   } else {
     contextFlowTime.textContent = "00:00";
     contextFlowLabel.textContent = "Steady";
@@ -1503,6 +1712,7 @@ const animateResumeToContext = async () => {
 };
 
 resumeContinue.addEventListener("click", async () => {
+  logUi("resumeContinue");
   playWhoosh();
   await animateResumeToContext();
   resumeOverlay.classList.remove("is-open");
@@ -1511,7 +1721,7 @@ resumeContinue.addEventListener("click", async () => {
   if (targetPath) {
     const existing = findTerminalTabByPath(targetPath);
     if (existing) {
-      setActiveTab(existing.id);
+      setActiveTab(existing.id, "resume-continue");
       return;
     }
     if (!activeTabId || tabs.get(activeTabId)?.kind !== "terminal") {
@@ -1590,6 +1800,12 @@ window.vibeflow.onPtyExit((tabId) => {
 });
 
 tabAddButton.addEventListener("click", () => {
+  const idleOpen = isIdleScreenOpen();
+  logUi("tabAddClick", { activeTabId, idleOpen });
+  if (idleOpen) {
+    void selectRepoAndCreateTab();
+    return;
+  }
   showIdleState();
 });
 
@@ -1597,6 +1813,20 @@ tabsContainer.addEventListener("wheel", (event) => {
   if (event.deltaY !== 0) {
     tabsContainer.scrollLeft += event.deltaY;
   }
+});
+
+fileRefresh.addEventListener("click", () => {
+  if (activeTabId && tabs.get(activeTabId)?.kind === "terminal") {
+    void loadRepoTree();
+    playClick();
+  }
+});
+
+fileToggle.addEventListener("click", () => {
+  logUi("toolPanelToggle", { collapsed: toolPanelCollapsed });
+  setToolPanelCollapsed(!toolPanelCollapsed);
+  fitActiveTerminal();
+  playClick();
 });
 
 chatSend.addEventListener("click", sendChatCommand);
@@ -1726,6 +1956,8 @@ setInterval(() => {
 void updateWindowButtons();
 updateAudioToggle();
 setChatCollapsed(true);
+setToolPanelVisible(false);
+setToolPanelCollapsed(false);
 welcomeSelect.addEventListener("click", () => {
   playClick();
   void selectRepoAndCreateTab();

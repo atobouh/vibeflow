@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import { spawn, IPty } from "node-pty";
@@ -8,6 +9,7 @@ type TabInfo = {
   pty: IPty;
   cwd: string;
   shellKind: ShellKind;
+  projectRoot: string | null;
 };
 
 let mainWindow: BrowserWindow | null = null;
@@ -100,7 +102,7 @@ function createTab(cwd = process.cwd()) {
     }
   });
 
-  tabs.set(id, { id, pty, cwd, shellKind });
+  tabs.set(id, { id, pty, cwd, shellKind, projectRoot: null });
   sessionManager.startSession(id, "tab-open", cwd);
 
   pty.onData((data) => {
@@ -115,10 +117,15 @@ function createTab(cwd = process.cwd()) {
   });
 
   const session = sessionManager.getActiveSession(id);
+  const projectRoot = session?.projectRoot || null;
+  const tab = tabs.get(id);
+  if (tab) {
+    tab.projectRoot = projectRoot;
+  }
   return {
     id,
     cwd,
-    projectRoot: session?.projectRoot || null,
+    projectRoot,
     shellKind
   };
 }
@@ -183,6 +190,129 @@ ipcMain.handle("session-get-recent", () => {
 
 ipcMain.handle("session-get-all", () => {
   return sessionManager.getAllSessions();
+});
+
+type FileNode = {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  children?: FileNode[];
+};
+
+const SKIP_DIRS = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".turbo"
+]);
+const MAX_TREE_DEPTH = 4;
+const MAX_TREE_ENTRIES = 1200;
+
+function isWithinRoot(root: string, target: string) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = path.resolve(target);
+  return (
+    resolvedTarget === resolvedRoot ||
+    resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)
+  );
+}
+
+async function buildTree(
+  root: string,
+  current: string,
+  depth: number,
+  counter: { count: number }
+): Promise<FileNode[]> {
+  if (depth > MAX_TREE_DEPTH || counter.count > MAX_TREE_ENTRIES) {
+    return [];
+  }
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = await fs.promises.readdir(current, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const dirs = entries.filter((entry) => entry.isDirectory());
+  const files = entries.filter((entry) => entry.isFile());
+  const ordered = [...dirs, ...files];
+
+  const nodes: FileNode[] = [];
+  for (const entry of ordered) {
+    if (counter.count > MAX_TREE_ENTRIES) {
+      break;
+    }
+    if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) {
+      continue;
+    }
+    const fullPath = path.join(current, entry.name);
+    const relPath = path.relative(root, fullPath);
+    if (entry.isDirectory()) {
+      counter.count += 1;
+      const node: FileNode = {
+        name: entry.name,
+        path: relPath,
+        type: "dir"
+      };
+      if (depth < MAX_TREE_DEPTH) {
+        node.children = await buildTree(root, fullPath, depth + 1, counter);
+      }
+      nodes.push(node);
+    } else if (entry.isFile()) {
+      counter.count += 1;
+      nodes.push({
+        name: entry.name,
+        path: relPath,
+        type: "file"
+      });
+    }
+  }
+  return nodes;
+}
+
+ipcMain.handle("repo-get-tree", async (_event, tabId: string) => {
+  const tab = tabs.get(tabId);
+  if (!tab) {
+    return null;
+  }
+  const root = tab.projectRoot || tab.cwd;
+  const counter = { count: 0 };
+  const children = await buildTree(root, root, 0, counter);
+  return {
+    name: path.basename(root),
+    path: "",
+    type: "dir",
+    children
+  } satisfies FileNode;
+});
+
+ipcMain.handle("repo-read-file", async (_event, tabId: string, relPath: string) => {
+  const tab = tabs.get(tabId);
+  if (!tab) {
+    return { ok: false, message: "No active tab." };
+  }
+  const root = tab.projectRoot || tab.cwd;
+  const fullPath = path.join(root, relPath);
+  if (!isWithinRoot(root, fullPath)) {
+    return { ok: false, message: "Invalid path." };
+  }
+  try {
+    const stat = await fs.promises.stat(fullPath);
+    const maxSize = 256 * 1024;
+    if (stat.size > maxSize) {
+      return { ok: false, message: "File too large to preview." };
+    }
+    const buffer = await fs.promises.readFile(fullPath);
+    if (buffer.includes(0)) {
+      return { ok: false, message: "Binary file preview not supported." };
+    }
+    return { ok: true, content: buffer.toString("utf8") };
+  } catch {
+    return { ok: false, message: "Unable to read file." };
+  }
 });
 
 ipcMain.on("window-control", (event, action: string) => {

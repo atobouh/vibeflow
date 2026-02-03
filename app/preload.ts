@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld("vibeflow", {
   getActiveSession: (tabId: string) => ipcRenderer.invoke("session-get-active", tabId),
   getRecentSessions: () => ipcRenderer.invoke("session-get-recent"),
   getAllSessions: () => ipcRenderer.invoke("session-get-all"),
+  getRepoTree: (tabId: string) => ipcRenderer.invoke("repo-get-tree", tabId),
+  readRepoFile: (tabId: string, relPath: string) =>
+    ipcRenderer.invoke("repo-read-file", tabId, relPath),
   onPtyData: (callback: (tabId: string, data: string) => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,

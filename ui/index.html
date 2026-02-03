@@ -260,6 +260,142 @@
         background: #050505;
       }
 
+      .tool-panel {
+        width: 260px;
+        margin: 6px 0 6px 6px;
+        background: #0b0b0d;
+        border: 1px solid var(--app-border);
+        border-radius: 8px;
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        transition: width 0.2s ease;
+      }
+
+      .tool-panel.collapsed {
+        width: 42px;
+      }
+
+      .tool-panel.collapsed .tool-tree,
+      .tool-panel.collapsed .tool-viewer {
+        display: none;
+      }
+
+      .tool-panel.collapsed .tool-header span {
+        display: none;
+      }
+
+      .tool-panel.collapsed .tool-action.refresh {
+        display: none;
+      }
+
+      .tool-panel.collapsed .tool-header {
+        justify-content: center;
+        padding: 0;
+      }
+
+      .tool-header {
+        height: 40px;
+        padding: 0 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        background: #0e0e10;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+
+      .tool-action {
+        border: none;
+        background: transparent;
+        color: #64748b;
+        cursor: pointer;
+      }
+
+      .tool-action:hover {
+        color: #fff;
+      }
+
+      .tool-action.secondary {
+        font-size: 12px;
+      }
+
+      .tool-tree {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 0;
+      }
+
+      .tool-node {
+        display: grid;
+        gap: 4px;
+      }
+
+      .tool-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: #cbd5f5;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .tool-item:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .tool-item .icon {
+        width: 14px;
+        display: inline-flex;
+        justify-content: center;
+        color: #94a3b8;
+      }
+
+      .tool-item.file .icon {
+        color: #60a5fa;
+      }
+
+      .tool-children {
+        display: grid;
+        gap: 2px;
+      }
+
+      .tool-children.collapsed {
+        display: none;
+      }
+
+      .tool-viewer {
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        background: #0f1013;
+        padding: 10px 12px;
+        display: grid;
+        gap: 8px;
+        min-height: 140px;
+        max-height: 220px;
+      }
+
+      .tool-path {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: #94a3b8;
+      }
+
+      .tool-content {
+        font-family: "JetBrains Mono", "Cascadia Mono", monospace;
+        font-size: 11px;
+        color: #e5e7eb;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-y: auto;
+        max-height: 160px;
+      }
+
       .terminal-container {
         flex: 1;
         margin: 6px;
@@ -334,6 +470,7 @@
         padding: 16px;
         display: grid;
         gap: 10px;
+        align-content: start;
       }
 
       .panel-card h3 {
@@ -356,6 +493,45 @@
       .settings-hint {
         font-size: 12px;
         color: #9ca3af;
+      }
+
+      .settings-list {
+        display: grid;
+        gap: 8px;
+        font-size: 12px;
+        color: #e5e7eb;
+      }
+
+      .settings-command {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .settings-command-text {
+        display: grid;
+        gap: 2px;
+      }
+
+      .settings-command-title {
+        font-weight: 600;
+        color: #f8fafc;
+      }
+
+      .settings-command-hint {
+        font-size: 10px;
+        color: #9ca3af;
+      }
+
+      .settings-command kbd {
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+        font-size: 10px;
+        color: #e5e7eb;
+        font-family: "JetBrains Mono", "Cascadia Mono", monospace;
       }
 
       .toggle {
@@ -402,6 +578,7 @@
       .history-list {
         display: grid;
         gap: 10px;
+        margin: 0;
       }
 
       .history-item {
@@ -465,22 +642,7 @@
         display: grid;
         grid-template-columns: 260px 1fr;
         gap: 18px;
-      }
-
-      .history-right {
-        display: grid;
-        gap: 18px;
-      }
-
-      .history-details {
-        min-height: 220px;
-      }
-
-      .history-details-body {
-        display: grid;
-        gap: 12px;
-        color: #e5e7eb;
-        font-size: 12px;
+        align-items: start;
       }
 
       .history-details-label {
@@ -513,6 +675,38 @@
       .history-empty {
         font-size: 12px;
         color: #94a3b8;
+      }
+
+      .history-details-inline {
+        margin-top: 10px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: #101115;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        display: grid;
+        gap: 10px;
+      }
+
+      .history-details-inline .history-details-body {
+        display: grid;
+        gap: 12px;
+        color: #e5e7eb;
+        font-size: 12px;
+      }
+
+      .history-details-close {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .history-details-close button {
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: #121214;
+        color: #e5e7eb;
+        font-size: 11px;
+        cursor: pointer;
       }
 
       .terminal-container.flash-success {
@@ -1497,7 +1691,7 @@
           </div>
           <span class="brand-text">VibeFlow</span>
         </div>
-        <div id="tab-container" class="tab-container"></div>
+        <div id="tab-container" class="tab-container no-drag"></div>
         <button id="vf-tab-add" class="tab-add no-drag" type="button">
           <i class="fa-solid fa-plus"></i>
         </button>
@@ -1522,6 +1716,25 @@
     </header>
 
     <main class="workspace">
+      <aside id="tool-panel" class="tool-panel">
+        <div class="tool-header">
+          <span>Files</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+          <button id="vf-files-refresh" class="tool-action refresh" type="button" title="Refresh">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+          <button id="vf-files-toggle" class="tool-action secondary toggle" type="button" title="Collapse">
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
+          </div>
+        </div>
+        <div id="vf-file-tree" class="tool-tree"></div>
+        <div class="tool-viewer">
+          <div id="vf-file-path" class="tool-path">No file selected</div>
+          <div id="vf-file-content" class="tool-content">Select a file to preview.</div>
+        </div>
+      </aside>
+
       <section id="terminal-container" class="terminal-container">
         <div id="terminal-stack"></div>
         <div id="new-tab-screen" class="new-tab-screen">
