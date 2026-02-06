@@ -42,6 +42,12 @@
         background: #444;
       }
 
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
       body {
         background-color: #000;
         color: var(--app-text);
@@ -164,6 +170,16 @@
         color: #fff;
         border: 1px solid rgba(255, 255, 255, 0.08);
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+      }
+
+      .tab.dragging {
+        opacity: 0.5;
+        border: 1px dashed rgba(255, 255, 255, 0.2);
+      }
+
+      .tab.drag-over {
+        border-left: 2px solid rgba(59, 130, 246, 0.75);
+        box-shadow: inset 4px 0 0 rgba(59, 130, 246, 0.25);
       }
 
       .tab.placeholder {
@@ -353,6 +369,30 @@
         background: rgba(255, 255, 255, 0.04);
       }
 
+      .tool-item.active {
+        background: rgba(34, 197, 94, 0.12);
+        outline: 1px solid rgba(34, 197, 94, 0.5);
+        color: #e2e8f0;
+      }
+
+      .tool-item.file.is-read {
+        box-shadow: inset 2px 0 0 #facc15;
+        color: #fef08a;
+      }
+
+      .tool-item.file.is-write {
+        box-shadow: inset 2px 0 0 #f87171;
+        color: #fecaca;
+      }
+
+      .tool-item.active.is-read,
+      .tool-item.active.is-write {
+        background: rgba(34, 197, 94, 0.12);
+        outline: 1px solid rgba(34, 197, 94, 0.5);
+        color: #e2e8f0;
+        box-shadow: none;
+      }
+
       .tool-item .icon {
         width: 14px;
         display: inline-flex;
@@ -412,12 +452,36 @@
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
       }
 
+      .terminal-scrollbar {
+        position: absolute;
+        top: 10px;
+        right: 6px;
+        bottom: 10px;
+        width: 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 2px 0;
+        z-index: 14;
+      }
+
+      .terminal-scrollbar-thumb {
+        width: 6px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.7);
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.35);
+        cursor: pointer;
+      }
+
       .intent-quick {
         position: absolute;
         right: 18px;
         bottom: 16px;
         z-index: 12;
-        display: none;
+        display: inline-flex;
         align-items: center;
         gap: 8px;
         padding: 8px 12px;
@@ -429,6 +493,40 @@
         letter-spacing: 0.08em;
         text-transform: uppercase;
         cursor: pointer;
+      }
+
+      .intent-actions {
+        position: absolute;
+        right: 18px;
+        bottom: 16px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        z-index: 12;
+      }
+
+      .intent-actions .intent-quick {
+        position: static;
+      }
+
+      .terminal-jump {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(18, 18, 20, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #e5e7eb;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .terminal-jump:hover {
+        border-color: rgba(59, 130, 246, 0.5);
+        color: #fff;
       }
 
       .intent-quick:hover {
@@ -760,6 +858,12 @@
         gap: 6px;
       }
 
+      .history-diff-files {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
       .history-tag {
         padding: 4px 8px;
         border-radius: 999px;
@@ -767,6 +871,16 @@
         background: rgba(255, 255, 255, 0.04);
         font-size: 10px;
         color: #e5e7eb;
+      }
+
+      .history-diff-chip {
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #151922;
+        border: 1px solid rgba(59, 130, 246, 0.15);
+        color: #cbd5f5;
+        font-size: 10px;
+        font-family: "JetBrains Mono", "Cascadia Mono", monospace;
       }
 
       .history-empty {
@@ -838,6 +952,20 @@
         padding: 18px 20px 24px;
       }
 
+      .terminal-pane .xterm-viewport {
+        overflow-y: scroll !important;
+        scrollbar-gutter: stable;
+        scrollbar-width: none;
+      }
+
+      .terminal-pane .xterm-viewport::-webkit-scrollbar {
+        width: 0;
+      }
+
+      .terminal-pane .xterm-viewport::-webkit-scrollbar-thumb {
+        background: transparent;
+      }
+
       .context-panel {
         width: 320px;
         background: var(--app-panel);
@@ -851,6 +979,14 @@
         width: 48px;
       }
 
+      .context-panel.collapsed .context-actions {
+        gap: 0;
+      }
+
+      .context-panel.collapsed #vf-action-echo {
+        display: none;
+      }
+
       .context-panel.collapsed .panel-content,
       .context-panel.collapsed .title-container {
         display: none;
@@ -858,6 +994,10 @@
 
       .context-panel.collapsed .vertical-label {
         display: flex;
+      }
+
+      .context-panel.collapsed .context-echoes {
+        display: none;
       }
 
       .context-header {
@@ -868,6 +1008,12 @@
         justify-content: space-between;
         padding: 0 16px;
         background: #0e0e10;
+      }
+
+      .context-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
       }
 
       .title-container {
@@ -1042,12 +1188,157 @@
         border: 1px solid transparent;
         color: #9ca3af;
         font-size: 12px;
+        align-items: center;
       }
 
       .thoughts-list li:hover {
         background: #1a1a1c;
         border-color: rgba(255, 255, 255, 0.05);
         color: #d1d5db;
+      }
+
+      .thoughts-delete {
+        margin-left: auto;
+        border: none;
+        background: transparent;
+        color: #6b7280;
+        cursor: pointer;
+        font-size: 12px;
+        padding: 4px;
+      }
+
+      .thoughts-delete:hover {
+        color: #f87171;
+      }
+
+      .context-echoes {
+        margin: 8px 16px 16px;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(59, 130, 246, 0.18);
+        background: linear-gradient(135deg, rgba(19, 24, 36, 0.9), rgba(13, 16, 22, 0.95));
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.4);
+        display: none;
+        gap: 8px;
+      }
+
+      .context-echoes-title {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: #93c5fd;
+      }
+
+      .echo-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .echo-item {
+        display: grid;
+        gap: 8px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(14, 18, 26, 0.95);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+        color: #e5e7eb;
+      }
+
+      .echo-text {
+        font-size: 12px;
+        color: #e5e7eb;
+        line-height: 1.4;
+      }
+
+      .echo-actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .echo-action {
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+        color: #cbd5f5;
+        font-size: 10px;
+        cursor: pointer;
+      }
+
+      .echo-action.primary {
+        border-color: rgba(34, 197, 94, 0.35);
+        color: #86efac;
+      }
+
+      .echo-action.danger {
+        border-color: rgba(248, 113, 113, 0.35);
+        color: #fca5a5;
+      }
+
+      .echo-enter {
+        animation: echoSlideIn 0.6s cubic-bezier(0.2, 0.7, 0.1, 1.2) both;
+      }
+
+      @keyframes echoSlideIn {
+        0% {
+          opacity: 0;
+          transform: translateX(40px);
+        }
+        70% {
+          opacity: 1;
+          transform: translateX(-6px);
+        }
+        100% {
+          transform: translateX(0);
+        }
+      }
+
+      .thought-skeleton {
+        display: grid;
+        grid-template-columns: 8px 1fr;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+        border-radius: 8px;
+        background: rgba(24, 24, 27, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        animation: skeletonPulse 0.75s ease-out;
+      }
+
+      .skeleton-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(59, 130, 246, 0.6);
+        box-shadow: 0 0 8px rgba(59, 130, 246, 0.35);
+      }
+
+      .skeleton-bar {
+        height: 8px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.06));
+        background-size: 200% 100%;
+        animation: shimmer 0.9s ease-in-out;
+      }
+
+      @keyframes shimmer {
+        0% {
+          background-position: 0% 50%;
+        }
+        100% {
+          background-position: 100% 50%;
+        }
+      }
+
+      @keyframes skeletonPulse {
+        0% {
+          transform: scale(0.98);
+          opacity: 0.7;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
       }
 
       .context-footer {
@@ -1452,6 +1743,29 @@
         font-size: 13px;
       }
 
+      .resume-repo {
+        margin-top: 10px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #60a5fa;
+        text-shadow: 0 0 16px rgba(59, 130, 246, 0.45);
+      }
+
+      .resume-trace {
+        margin-top: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        background: rgba(59, 130, 246, 0.12);
+        color: #93c5fd;
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
       .resume-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1654,6 +1968,10 @@
         animation: contextPulse 0.7s ease-out;
       }
 
+      .context-panel.park-pulse {
+        animation: parkPulse 0.7s ease-out;
+      }
+
       @keyframes contextPulse {
         0% {
           box-shadow: 0 0 0 rgba(59, 130, 246, 0);
@@ -1663,6 +1981,18 @@
         }
         100% {
           box-shadow: 0 0 0 rgba(59, 130, 246, 0);
+        }
+      }
+
+      @keyframes parkPulse {
+        0% {
+          box-shadow: 0 0 0 rgba(34, 197, 94, 0);
+        }
+        50% {
+          box-shadow: 0 0 24px rgba(34, 197, 94, 0.35);
+        }
+        100% {
+          box-shadow: 0 0 0 rgba(34, 197, 94, 0);
         }
       }
 
@@ -1677,6 +2007,48 @@
 
       .receipt-screen.is-open {
         display: flex;
+      }
+
+      .time-echo-screen {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 8, 12, 0.94);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 70;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+
+      .time-echo-screen.is-open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .time-echo-card {
+        max-width: 520px;
+        padding: 24px 28px;
+        border-radius: 16px;
+        background: rgba(16, 16, 20, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+        text-align: center;
+      }
+
+      .time-echo-label {
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #8b8b95;
+        margin-bottom: 14px;
+      }
+
+      .time-echo-text {
+        font-size: 18px;
+        line-height: 1.4;
+        color: #f4f4f5;
       }
 
       .receipt-card {
@@ -1751,6 +2123,44 @@
         font-size: 16px;
         font-weight: 600;
         color: #f9fafb;
+      }
+
+      .receipt-diff {
+        margin-top: 16px;
+        padding: 12px;
+        border-radius: 12px;
+        background: #101217;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        display: grid;
+        gap: 8px;
+      }
+
+      .receipt-diff-title {
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #94a3b8;
+      }
+
+      .receipt-diff-intent {
+        font-size: 13px;
+        color: #e5e7eb;
+      }
+
+      .receipt-diff-files {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .receipt-diff-chip {
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #151922;
+        border: 1px solid rgba(59, 130, 246, 0.15);
+        color: #cbd5f5;
+        font-size: 11px;
+        font-family: "JetBrains Mono", "Cascadia Mono", monospace;
       }
 
       .receipt-actions {
@@ -1856,6 +2266,9 @@
 
       <section id="terminal-container" class="terminal-container">
         <div id="terminal-stack"></div>
+        <div id="vf-terminal-scrollbar" class="terminal-scrollbar hidden">
+          <div id="vf-terminal-scrollbar-thumb" class="terminal-scrollbar-thumb"></div>
+        </div>
         <div id="new-tab-screen" class="new-tab-screen">
           <div class="new-tab-card">
             <button id="vf-welcome-select" type="button">
@@ -1869,10 +2282,16 @@
             </div>
           </div>
         </div>
-        <button id="vf-intent-quick" class="intent-quick" type="button" title="Save intent from terminal">
-          <i class="fa-solid fa-bookmark"></i>
-          Save intent
-        </button>
+        <div class="intent-actions">
+          <button id="vf-terminal-jump" class="terminal-jump" type="button" title="Jump to bottom">
+            <i class="fa-solid fa-arrow-down"></i>
+            Jump
+          </button>
+          <button id="vf-intent-quick" class="intent-quick" type="button" title="Save intent from terminal">
+            <i class="fa-solid fa-bookmark"></i>
+            Save intent
+          </button>
+        </div>
       </section>
 
       <aside class="context-panel" id="context-panel">
@@ -1881,9 +2300,14 @@
             <div class="status-dot"></div>
             <span class="context-title">Live Context</span>
           </div>
-          <button id="vf-context-toggle" class="context-toggle" type="button">
-            <i id="vf-context-icon" class="fa-solid fa-angle-right"></i>
-          </button>
+          <div class="context-actions">
+            <button id="vf-action-echo" class="context-toggle" type="button" title="Send Time Echo">
+              <i class="fa-regular fa-hourglass"></i>
+            </button>
+            <button id="vf-context-toggle" class="context-toggle" type="button">
+              <i id="vf-context-icon" class="fa-solid fa-angle-right"></i>
+            </button>
+          </div>
         </div>
 
         <div class="panel-content">
@@ -1902,7 +2326,7 @@
             <div class="flow-row">
               <span id="vf-context-flow-time" class="flow-time">00:00</span>
               <span class="flow-state">
-                <i class="fa-solid fa-bolt"></i>
+                <i id="vf-context-flow-icon" class="fa-solid fa-bolt"></i>
                 <span id="vf-context-flow-label">Steady</span>
               </span>
             </div>
@@ -1930,6 +2354,11 @@
             <i class="fa-regular fa-copy"></i>
             Copy Context
           </button>
+        </div>
+
+        <div id="vf-context-echoes" class="context-echoes">
+          <div class="context-echoes-title">Time Echoes</div>
+          <div id="vf-echo-list" class="echo-list"></div>
         </div>
 
         <div class="vertical-label">
@@ -2030,6 +2459,8 @@
           </div>
           <h1 class="resume-title">Welcome Back</h1>
           <p id="vf-resume-sub" class="resume-sub"></p>
+          <div id="vf-resume-repo" class="resume-repo"></div>
+          <div id="vf-resume-trace" class="resume-trace" style="display: none;"></div>
         </div>
 
         <div class="resume-grid">
@@ -2072,6 +2503,13 @@
       </div>
     </div>
 
+    <div id="time-echo-screen" class="time-echo-screen">
+      <div class="time-echo-card">
+        <div class="time-echo-label">Earlier, you told yourself</div>
+        <div id="vf-time-echo-text" class="time-echo-text"></div>
+      </div>
+    </div>
+
     <div id="receipt-screen" class="receipt-screen overlay-backdrop">
       <div class="receipt-card">
         <div class="receipt-glow"></div>
@@ -2098,6 +2536,11 @@
             <div class="receipt-metric-label">Context Notes</div>
             <div id="vf-receipt-context" class="receipt-metric-value">0</div>
           </div>
+        </div>
+        <div class="receipt-diff">
+          <div class="receipt-diff-title">Context Diff</div>
+          <div id="vf-receipt-diff-intent" class="receipt-diff-intent"></div>
+          <div id="vf-receipt-diff-files" class="receipt-diff-files"></div>
         </div>
         <div class="receipt-actions">
           <button id="vf-receipt-close" type="button">Close</button>

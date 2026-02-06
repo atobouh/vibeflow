@@ -1,6 +1,6 @@
-﻿{
+{
   "name": "vibeflow-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "VibeFlow CLI - intent, context, and session memory for any repo.",
   "author": "Dev Kuns (https://github.com/atobouh)",
   "license": "MIT",

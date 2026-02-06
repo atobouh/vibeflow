@@ -14,10 +14,25 @@ type TabState = {
   fitAddon?: FitAddon;
   shellKind?: ShellKind;
   outputBuffer?: string;
+  readOutputBuffer?: string;
   currentLine?: string;
   lastCommand?: string;
+  escapeSequence?: string | null;
+  followOutput?: boolean;
   cwd?: string;
   projectRoot?: string | null;
+  timeEchoes?: Array<{
+    id: string;
+    text: string;
+    createdAt: string;
+    deliverAt: string;
+  }>;
+  echoesConsumed?: boolean;
+  lastUserActionAt?: number;
+  lastOutputAt?: number;
+  displayElapsedMs?: number;
+  lastDisplayTick?: number;
+  sessionStartedAt?: string;
 };
 
 type ShellKind = "powershell" | "cmd" | "bash" | "zsh" | "fish" | "unknown";
@@ -35,6 +50,8 @@ const tabAddButton = document.getElementById("vf-tab-add");
 const contextPanel = document.getElementById("context-panel");
 const contextToggle = document.getElementById("vf-context-toggle");
 const contextIcon = document.getElementById("vf-context-icon");
+const terminalScrollbar = document.getElementById("vf-terminal-scrollbar");
+const terminalScrollbarThumb = document.getElementById("vf-terminal-scrollbar-thumb");
 const welcomePane = document.getElementById("new-tab-screen");
 const welcomeSelect = document.getElementById("vf-welcome-select");
 const recentWrap = document.getElementById("vf-recent-wrap");
@@ -43,11 +60,15 @@ const recentList = document.getElementById("vf-recent-list");
 const contextIntent = document.getElementById("vf-context-intent");
 const contextFlowTime = document.getElementById("vf-context-flow-time");
 const contextFlowLabel = document.getElementById("vf-context-flow-label");
+const contextFlowIcon = document.getElementById("vf-context-flow-icon");
 const contextFlowBar = document.getElementById("vf-context-flow-bar");
 const contextThoughts = document.getElementById("vf-context-thoughts");
 const contextIntentAction = document.getElementById("vf-action-intent");
 const contextThoughtAction = document.getElementById("vf-action-thought");
+const contextEchoAction = document.getElementById("vf-action-echo");
 const contextCopy = document.getElementById("vf-context-copy");
+const contextEchoes = document.getElementById("vf-context-echoes");
+const contextEchoList = document.getElementById("vf-echo-list");
 
 const chatLog = document.getElementById("vf-chat-log");
 const chatInput = document.getElementById("vf-chat-text") as HTMLInputElement | null;
@@ -57,6 +78,7 @@ const commandDock = document.getElementById("command-dock");
 const chatToggle = document.getElementById("vf-chat-toggle");
 const chatExpand = document.getElementById("vf-chat-expand");
 const chatCollapsed = document.getElementById("vf-chat-collapsed");
+const terminalJump = document.getElementById("vf-terminal-jump");
 const quickIntent = document.getElementById("vf-intent-quick");
 const settingsOpen = document.getElementById("vf-settings-open");
 const historyOpen = document.getElementById("vf-history-open");
@@ -68,6 +90,8 @@ const closeButton = document.getElementById("vf-window-close");
 
 const resumeOverlay = document.getElementById("resume-screen");
 const resumeSub = document.getElementById("vf-resume-sub");
+const resumeRepo = document.getElementById("vf-resume-repo");
+const resumeTrace = document.getElementById("vf-resume-trace");
 const resumeDuration = document.getElementById("vf-resume-duration");
 const resumeIntent = document.getElementById("vf-resume-intent");
 const resumeFlow = document.getElementById("vf-resume-flow");
@@ -84,10 +108,14 @@ const receiptSummary = document.getElementById("vf-receipt-summary");
 const receiptDuration = document.getElementById("vf-receipt-duration");
 const receiptIntents = document.getElementById("vf-receipt-intents");
 const receiptContext = document.getElementById("vf-receipt-context");
+const receiptDiffIntent = document.getElementById("vf-receipt-diff-intent");
+const receiptDiffFiles = document.getElementById("vf-receipt-diff-files");
 const receiptFlow = document.getElementById("vf-receipt-flow");
 const receiptCopy = document.getElementById("vf-receipt-copy");
 const receiptClose = document.getElementById("vf-receipt-close");
 const receiptNew = document.getElementById("vf-receipt-new");
+const timeEchoScreen = document.getElementById("time-echo-screen");
+const timeEchoText = document.getElementById("vf-time-echo-text");
 const confirmOverlay = document.getElementById("vf-confirm-overlay");
 const confirmTitle = document.getElementById("vf-confirm-title");
 const confirmMessage = document.getElementById("vf-confirm-message");
@@ -101,6 +129,9 @@ const DEBUG_UI = (() => {
     return false;
   }
 })();
+
+const UI_IDLE_THRESHOLD_MS = 8_000;
+const UI_PAUSED_THRESHOLD_MS = 5 * 60 * 1000;
 
 const logUi = (...args: unknown[]) => {
   if (DEBUG_UI) {
@@ -120,6 +151,8 @@ if (
   !tabsContainer ||
   !tabAddButton ||
   !contextPanel ||
+  !terminalScrollbar ||
+  !terminalScrollbarThumb ||
   !welcomePane ||
   !welcomeSelect ||
   !contextToggle ||
@@ -127,11 +160,15 @@ if (
   !contextIntent ||
   !contextFlowTime ||
   !contextFlowLabel ||
+  !contextFlowIcon ||
   !contextFlowBar ||
   !contextThoughts ||
   !contextIntentAction ||
   !contextThoughtAction ||
+  !contextEchoAction ||
   !contextCopy ||
+  !contextEchoes ||
+  !contextEchoList ||
   !chatLog ||
   !chatInput ||
   !chatSend ||
@@ -140,6 +177,7 @@ if (
   !chatToggle ||
   !chatExpand ||
   !chatCollapsed ||
+  !terminalJump ||
   !quickIntent ||
   !settingsOpen ||
   !historyOpen ||
@@ -149,6 +187,8 @@ if (
   !closeButton ||
   !resumeOverlay ||
   !resumeSub ||
+  !resumeRepo ||
+  !resumeTrace ||
   !resumeDuration ||
   !resumeIntent ||
   !resumeFlow ||
@@ -166,10 +206,14 @@ if (
   !receiptDuration ||
   !receiptIntents ||
   !receiptContext ||
+  !receiptDiffIntent ||
+  !receiptDiffFiles ||
   !receiptFlow ||
   !receiptCopy ||
   !receiptClose ||
   !receiptNew ||
+  !timeEchoScreen ||
+  !timeEchoText ||
   !confirmOverlay ||
   !confirmTitle ||
   !confirmMessage ||
@@ -180,16 +224,20 @@ if (
 }
 
 const tabs = new Map<string, TabState>();
+let tabOrder: string[] = [];
 let activeTabId: string | null = null;
 let overlayTabId: string | null = null;
 let receiptAction: (() => void) | null = null;
 let receiptText = "";
+let resumeSession: SessionRecord | null = null;
 let audioEnabled = true;
 let audioContext: AudioContext | null = null;
 let flashTimer: number | null = null;
 const isIdleScreenOpen = () => welcomePane.classList.contains("is-open");
 let chatIsCollapsed = false;
 let settingsAudioInput: HTMLInputElement | null = null;
+let settingsVibeTraceInput: HTMLInputElement | null = null;
+let settingsVibeTraceRepoSelect: HTMLSelectElement | null = null;
 let settingsSessionSelect: HTMLSelectElement | null = null;
 let settingsRepoSelect: HTMLSelectElement | null = null;
 let settingsDeleteSessionButton: HTMLButtonElement | null = null;
@@ -203,6 +251,11 @@ let openHistorySessionId: string | null = null;
 let toolPanelCollapsed = false;
 let confirmAction: (() => void) | null = null;
 let settingsRepoStats = new Map<string, { name: string; count: number }>();
+const fileActivityByTab = new Map<string, Map<string, { type: "read" | "write"; expiresAt: number }>>();
+const fileActivityTimers = new Map<string, number>();
+const selectedFileByTab = new Map<string, string>();
+let isScrollDragging = false;
+let includeVibeTrace = false;
 
 const setTerminalStdin = (term: Terminal, enabled: boolean) => {
   const termAny = term as unknown as {
@@ -217,6 +270,82 @@ const setTerminalStdin = (term: Terminal, enabled: boolean) => {
     termAny.options = {};
   }
   termAny.options.disableStdin = !enabled;
+};
+
+const sendCommandToTerminal = (tabId: string, input: string, shellKind: ShellKind) => {
+  const newline = shellKind === "powershell" || shellKind === "cmd" ? "\r\n" : "\n";
+  window.vibeflow.write(tabId, `${input}${newline}`);
+};
+
+const stripAnsi = (value: string) =>
+  value
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001bO./g, "");
+
+const sanitizeTerminalText = (value: string) =>
+  stripAnsi(value).replace(/[\u0000-\u001f\u007f]/g, "").trim();
+
+const getViewportY = (term: Terminal) =>
+  (term as unknown as { buffer?: { active?: { viewportY?: number } } }).buffer?.active
+    ?.viewportY ?? 0;
+
+const getBaseY = (term: Terminal) =>
+  (term as unknown as { buffer?: { active?: { baseY?: number } } }).buffer?.active?.baseY ?? 0;
+
+const isTerminalAtBottom = (term: Terminal) => {
+  const baseY = getBaseY(term);
+  const viewportY = getViewportY(term);
+  return viewportY >= baseY - 1;
+};
+
+const normalizePath = (value: string) => value.replace(/\\/g, "/");
+
+const extractReadPaths = (line: string) => {
+  const results: string[] = [];
+  const cleaned = line.trim();
+  if (!cleaned) {
+    return results;
+  }
+  const commandMatch = cleaned.match(/\b(?:get-content|cat|type|bat)\b\s+([^\s]+?)(?:\s|$)/i);
+  if (commandMatch?.[1]) {
+    const candidate = commandMatch[1].replace(/^['"]|['"]$/g, "").replace(/[),.;]+$/g, "");
+    results.push(candidate);
+    return results;
+  }
+  const ranMatch = cleaned.match(
+    /\b(?:ran\s+)(?:get-content|cat|type|bat)\b\s+([^\s]+?)(?:\s|$)/i
+  );
+  if (ranMatch?.[1]) {
+    const candidate = ranMatch[1].replace(/^['"]|['"]$/g, "").replace(/[),.;]+$/g, "");
+    results.push(candidate);
+    return results;
+  }
+  const readInline = cleaned.match(/\b(?:reading|read|opened|opening)\b\s+([^\s]+)$/i);
+  if (readInline?.[1]) {
+    results.push(readInline[1].replace(/^['"]|['"]$/g, ""));
+    return results;
+  }
+  const patterns = [
+    /^([A-Za-z]:[\\/][^:\s]+?\.[\w.-]+):\d+/,
+    /^(\/[^:\s]+?\.[\w.-]+):\d+/,
+    /^([A-Za-z0-9._-][^:\s]*\.[\w.-]+):\d+/
+  ];
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match?.[1]) {
+      results.push(match[1]);
+      return results;
+    }
+  }
+  const readMatch = cleaned.match(/\b(reading|read|opening|open)\b[^:]*:\s*(.+)$/i);
+  if (readMatch?.[2]) {
+    const candidate = readMatch[2].replace(/^['"]|['"]$/g, "");
+    const firstToken = candidate.split(/\s+/)[0];
+    if (firstToken) {
+      results.push(firstToken);
+    }
+  }
+  return results;
 };
 
 const openConfirm = (options: {
@@ -287,6 +416,14 @@ const formatClock = (ms: number) => {
   const seconds = totalSeconds % 60;
   const paddedSeconds = seconds.toString().padStart(2, "0");
   return `${minutes}:${paddedSeconds}`;
+};
+
+const markUserActivity = (tabId: string) => {
+  const tab = tabs.get(tabId);
+  if (!tab) {
+    return;
+  }
+  tab.lastUserActionAt = Date.now();
 };
 
 const formatHms = (ms: number) => {
@@ -496,6 +633,23 @@ const renderSettingsPane = (container: HTMLDivElement) => {
           </div>
         </div>
         <div class="panel-card">
+          <h3>VibeTrace</h3>
+          <div class="settings-field">
+            <label for="vf-vibetrace-repo-select">Repo</label>
+            <select id="vf-vibetrace-repo-select" class="settings-select"></select>
+          </div>
+          <div class="settings-row">
+            <div>
+              <div>Include VibeTrace in repo</div>
+              <div class="settings-hint">Writes .vibeflow/trace.json alongside your code.</div>
+            </div>
+            <label class="toggle">
+              <input id="vf-setting-vibetrace" type="checkbox" />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+        </div>
+        <div class="panel-card">
           <h3>Commands</h3>
           <div class="settings-list">
             <div class="settings-command">
@@ -518,6 +672,13 @@ const renderSettingsPane = (container: HTMLDivElement) => {
                 <div class="settings-command-hint">Save a quick note without breaking flow.</div>
               </div>
               <kbd>Alt+P</kbd>
+            </div>
+            <div class="settings-command">
+              <div class="settings-command-text">
+                <div class="settings-command-title">Time Echo</div>
+                <div class="settings-command-hint">Leave a message for your future self.</div>
+              </div>
+              <kbd>Alt+E</kbd>
             </div>
             <div class="settings-command">
               <div class="settings-command-text">
@@ -597,6 +758,12 @@ const renderSettingsPane = (container: HTMLDivElement) => {
     </div>
   `;
   settingsAudioInput = container.querySelector("#vf-setting-audio") as HTMLInputElement | null;
+  settingsVibeTraceInput = container.querySelector(
+    "#vf-setting-vibetrace"
+  ) as HTMLInputElement | null;
+  settingsVibeTraceRepoSelect = container.querySelector(
+    "#vf-vibetrace-repo-select"
+  ) as HTMLSelectElement | null;
   settingsSessionSelect = container.querySelector("#vf-settings-session-select") as
     | HTMLSelectElement
     | null;
@@ -609,11 +776,21 @@ const renderSettingsPane = (container: HTMLDivElement) => {
     | null;
   settingsVersionLabel = container.querySelector("#vf-about-version");
   updateAudioToggle();
+  void updateVibeTraceToggle();
   settingsAudioInput?.addEventListener("change", () => {
     audioEnabled = !!settingsAudioInput?.checked;
     if (audioEnabled) {
       playClick();
     }
+  });
+  settingsVibeTraceInput?.addEventListener("change", async () => {
+    const repoKey = settingsVibeTraceRepoSelect?.value || null;
+    if (!repoKey) {
+      return;
+    }
+    const next = !!settingsVibeTraceInput?.checked;
+    includeVibeTrace = await window.vibeflow.setVibeTraceInclude(repoKey, next);
+    playClick();
   });
   void refreshSettingsData();
   settingsDeleteSessionButton?.addEventListener("click", () => {
@@ -653,6 +830,9 @@ const renderSettingsPane = (container: HTMLDivElement) => {
       }
     });
   });
+  settingsVibeTraceRepoSelect?.addEventListener("change", () => {
+    void updateVibeTraceToggle();
+  });
   container.querySelectorAll<HTMLElement>("[data-external-url]").forEach((button) => {
     button.addEventListener("click", () => {
       const url = button.dataset.externalUrl;
@@ -680,12 +860,77 @@ const setToolPanelCollapsed = (collapsed: boolean) => {
   }
 };
 
+const getFileActivityMap = (tabId: string) => {
+  const existing = fileActivityByTab.get(tabId);
+  if (existing) {
+    return existing;
+  }
+  const created = new Map<string, { type: "read" | "write"; expiresAt: number }>();
+  fileActivityByTab.set(tabId, created);
+  return created;
+};
+
+const refreshFileActivityStyles = (tabId: string | null = activeTabId) => {
+  if (!tabId || tabId !== activeTabId) {
+    return;
+  }
+  const activityMap = fileActivityByTab.get(tabId);
+  const now = Date.now();
+  fileTree.querySelectorAll<HTMLElement>(".tool-item.file").forEach((node) => {
+    const relPath = node.dataset.path;
+    node.classList.remove("is-read", "is-write");
+    if (!relPath || !activityMap) {
+      return;
+    }
+    const activity = activityMap.get(relPath);
+    if (!activity) {
+      return;
+    }
+    if (activity.expiresAt <= now) {
+      activityMap.delete(relPath);
+      return;
+    }
+    node.classList.add(activity.type === "write" ? "is-write" : "is-read");
+  });
+};
+
+const markFileActivity = (tabId: string, relPath: string, type: "read" | "write") => {
+  if (!relPath) {
+    return;
+  }
+  const activityMap = getFileActivityMap(tabId);
+  const ttl = 5000;
+  const expiresAt = Date.now() + ttl;
+  activityMap.set(relPath, { type, expiresAt });
+  const timerKey = `${tabId}:${relPath}`;
+  const existing = fileActivityTimers.get(timerKey);
+  if (existing) {
+    window.clearTimeout(existing);
+  }
+  const timer = window.setTimeout(() => {
+    const map = fileActivityByTab.get(tabId);
+    if (map) {
+      const entry = map.get(relPath);
+      if (entry && entry.expiresAt <= Date.now()) {
+        map.delete(relPath);
+        refreshFileActivityStyles(tabId);
+      }
+    }
+    fileActivityTimers.delete(timerKey);
+  }, ttl + 50);
+  fileActivityTimers.set(timerKey, timer);
+  refreshFileActivityStyles(tabId);
+};
+
 const renderFileTree = (node: FileNode | null) => {
   fileTree.innerHTML = "";
   if (!node || !node.children || node.children.length === 0) {
     fileTree.innerHTML = "<div class=\"history-empty\" style=\"padding: 8px 12px;\">No files found.</div>";
     return;
   }
+  const activePath = activeTabId ? selectedFileByTab.get(activeTabId) : null;
+  const activityMap = activeTabId ? fileActivityByTab.get(activeTabId) : null;
+  const now = Date.now();
 
   const buildNode = (item: FileNode, depth: number) => {
     const wrapper = document.createElement("div");
@@ -728,6 +973,14 @@ const renderFileTree = (node: FileNode | null) => {
       }
       wrapper.appendChild(childrenWrap);
     } else {
+      row.dataset.path = item.path;
+      if (activePath && item.path === activePath) {
+        row.classList.add("active");
+      }
+      const activity = activityMap?.get(item.path);
+      if (activity && activity.expiresAt > now) {
+        row.classList.add(activity.type === "write" ? "is-write" : "is-read");
+      }
       row.addEventListener("click", () => {
         void openFilePreview(item.path);
       });
@@ -745,6 +998,13 @@ const openFilePreview = async (relPath: string) => {
   if (!activeTabId) {
     return;
   }
+  selectedFileByTab.set(activeTabId, relPath);
+  const selected = fileTree.querySelectorAll(".tool-item.file.active");
+  selected.forEach((node) => node.classList.remove("active"));
+  const target = fileTree.querySelector(
+    `.tool-item.file[data-path="${CSS.escape(relPath)}"]`
+  );
+  target?.classList.add("active");
   filePath.textContent = relPath || "File preview";
   fileContent.textContent = "Loading...";
   const result = await window.vibeflow.readRepoFile(activeTabId, relPath);
@@ -769,6 +1029,7 @@ const loadRepoTree = async () => {
   fileTree.innerHTML = "<div class=\"history-empty\" style=\"padding: 8px 12px;\">Loading...</div>";
   const tree = await window.vibeflow.getRepoTree(activeTabId);
   renderFileTree(tree);
+  refreshFileActivityStyles(activeTabId);
 };
 
 const renderHistoryPane = (container: HTMLDivElement) => {
@@ -830,6 +1091,9 @@ const openSpecialTab = (kind: "settings" | "history") => {
     container,
     chat: []
   });
+  if (!tabOrder.includes(spec.id)) {
+    tabOrder.push(spec.id);
+  }
   renderTabs();
   setActiveTab(spec.id, "open-special-tab");
   if (kind === "history") {
@@ -875,8 +1139,41 @@ const handlePtyData = (tabId: string, data: string) => {
   if (!tab || tab.kind !== "terminal" || !tab.term) {
     return;
   }
+  tab.lastOutputAt = Date.now();
   if (!enableExitMarkers) {
+    const shouldFollow = tab.followOutput !== false;
     tab.term.write(data);
+    if (shouldFollow) {
+      tab.term.scrollToBottom();
+      tab.followOutput = true;
+    }
+    const cleaned = stripAnsi(data);
+    tab.readOutputBuffer = (tab.readOutputBuffer || "") + cleaned;
+    const lines = tab.readOutputBuffer.split(/\r?\n/);
+    tab.readOutputBuffer = lines.pop() || "";
+    const root = tab.projectRoot || tab.cwd || "";
+    const rootNorm = normalizePath(root);
+    const isWindowsRoot = /^[A-Za-z]:/.test(rootNorm);
+    for (const line of lines) {
+      const paths = extractReadPaths(line);
+      if (paths.length === 0) {
+        continue;
+      }
+      for (const candidate of paths) {
+        let rel = normalizePath(candidate).replace(/^\.\/+/, "");
+        if (rootNorm && normalizePath(candidate).startsWith(rootNorm)) {
+          rel = normalizePath(candidate).slice(rootNorm.length).replace(/^\/+/, "");
+        } else if (isWindowsRoot && normalizePath(candidate).toLowerCase().startsWith(rootNorm.toLowerCase())) {
+          rel = normalizePath(candidate).slice(rootNorm.length).replace(/^\/+/, "");
+        }
+        if (!rel || rel.startsWith("..")) {
+          continue;
+        }
+        markFileActivity(tabId, rel, "read");
+        window.vibeflow.recordFileRead(tabId, rel);
+      }
+    }
+    updateTerminalScrollbar();
     return;
   }
   tab.outputBuffer = `${tab.outputBuffer || ""}${data}`;
@@ -903,7 +1200,13 @@ const handlePtyData = (tabId: string, data: string) => {
   }
 
   if (output) {
+    const shouldFollow = tab.followOutput !== false;
     tab.term.write(output);
+    if (shouldFollow) {
+      tab.term.scrollToBottom();
+      tab.followOutput = true;
+    }
+    updateTerminalScrollbar();
   }
   if (tab.outputBuffer.length > 8000) {
     tab.outputBuffer = tab.outputBuffer.slice(-4000);
@@ -931,13 +1234,30 @@ const updateAudioToggle = () => {
   settingsAudioInput.checked = audioEnabled;
 };
 
+const updateVibeTraceToggle = async () => {
+  if (!settingsVibeTraceInput || !settingsVibeTraceRepoSelect) {
+    return;
+  }
+  const repoKey = settingsVibeTraceRepoSelect.value || null;
+  if (!repoKey) {
+    settingsVibeTraceInput.checked = false;
+    settingsVibeTraceInput.disabled = true;
+    return;
+  }
+  settingsVibeTraceInput.disabled = false;
+  includeVibeTrace = await window.vibeflow.getVibeTraceInclude(repoKey);
+  settingsVibeTraceInput.checked = includeVibeTrace;
+};
+
 const setChatCollapsed = (collapsed: boolean) => {
   chatIsCollapsed = collapsed;
   commandDock.classList.toggle("collapsed", collapsed);
   chatCollapsed.setAttribute("aria-hidden", (!collapsed).toString());
   chatToggle.setAttribute("aria-expanded", (!collapsed).toString());
   const activeTab = activeTabId ? tabs.get(activeTabId) : null;
-  quickIntent.style.display = activeTab?.kind === "terminal" ? "inline-flex" : "none";
+  const showTerminalActions = activeTab?.kind === "terminal";
+  quickIntent.style.display = showTerminalActions ? "inline-flex" : "none";
+  terminalJump.style.display = showTerminalActions ? "inline-flex" : "none";
   chatInput.disabled = collapsed;
   if (collapsed) {
     chatSend.setAttribute("disabled", "true");
@@ -958,18 +1278,41 @@ const setChatCollapsed = (collapsed: boolean) => {
   }
 };
 
-const createTerminal = () => {
-  return new Terminal({
+const createTerminal = (tabId: string) => {
+  const term = new Terminal({
     cursorBlink: true,
     fontSize: 13,
     fontFamily: "JetBrains Mono, Cascadia Mono, Consolas, monospace",
     fontWeight: "500",
     lineHeight: 1.25,
+    scrollback: 50000,
     theme: {
       background: "#0a0a0a",
       foreground: "#e4e4e7"
     }
   });
+  term.attachCustomKeyEventHandler((event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+      if (term.hasSelection()) {
+        const selection = term.getSelection();
+        if (selection) {
+          void navigator.clipboard.writeText(selection);
+        }
+        return false;
+      }
+    }
+    if (event.key === "PageUp" || event.key === "PageDown") {
+      const tab = tabs.get(tabId);
+      if (tab) {
+        tab.followOutput = false;
+      }
+      term.scrollLines(event.key === "PageUp" ? -10 : 10);
+      event.preventDefault();
+      return false;
+    }
+    return true;
+  });
+  return term;
 };
 
 const fitActiveTerminal = () => {
@@ -980,19 +1323,98 @@ const fitActiveTerminal = () => {
   if (!tab || tab.kind !== "terminal" || !tab.fitAddon || !tab.term) {
     return;
   }
+  const restoreScroll = tab.followOutput === false ? getViewportY(tab.term) : null;
   tab.fitAddon.fit();
   window.vibeflow.resize(tab.id, tab.term.cols, tab.term.rows);
+  if (restoreScroll !== null) {
+    const baseY = getBaseY(tab.term);
+    const target = Math.min(restoreScroll, baseY);
+    tab.term.scrollToLine(target);
+  }
+  updateTerminalScrollbar();
+};
+
+const scrollActiveTerminalToBottom = () => {
+  const tab = activeTabId ? tabs.get(activeTabId) : null;
+  if (tab?.kind === "terminal" && tab.term) {
+    tab.followOutput = true;
+    tab.term.scrollToBottom();
+    tab.term.focus();
+  }
+};
+
+const updateTerminalScrollbar = () => {
+  const tab = activeTabId ? tabs.get(activeTabId) : null;
+  if (!tab || tab.kind !== "terminal" || !tab.term) {
+    return;
+  }
+  const buffer = (tab.term as unknown as { buffer?: { active?: { baseY: number; length: number; viewportY: number } } })
+    .buffer?.active;
+  if (!buffer) {
+    return;
+  }
+  const total = buffer.length || 1;
+  const visible = tab.term.rows || 1;
+  const trackHeight = terminalScrollbar.clientHeight - 4;
+  const thumbHeight =
+    total <= visible + 1
+      ? trackHeight
+      : Math.max(24, Math.round((visible / total) * trackHeight));
+  const maxScroll = Math.max(0, total - visible);
+  const ratio = maxScroll > 0 ? buffer.viewportY / maxScroll : 0;
+  const top = Math.round(ratio * Math.max(0, trackHeight - thumbHeight));
+  terminalScrollbarThumb.style.height = `${thumbHeight}px`;
+  terminalScrollbarThumb.style.transform = `translateY(${Math.max(0, top)}px)`;
+};
+
+const scrollTerminalToRatio = (ratio: number) => {
+  const tab = activeTabId ? tabs.get(activeTabId) : null;
+  if (!tab || tab.kind !== "terminal" || !tab.term) {
+    return;
+  }
+  const buffer = (tab.term as unknown as { buffer?: { active?: { baseY: number } } }).buffer?.active;
+  if (!buffer) {
+    return;
+  }
+  const baseY = buffer.baseY || 0;
+  const target = Math.max(0, Math.min(baseY, Math.round(baseY * ratio)));
+  tab.followOutput = false;
+  tab.term.scrollToLine(target);
+  updateTerminalScrollbar();
+};
+
+const ensureTabOrder = () => {
+  if (tabOrder.length === 0 && tabs.size > 0) {
+    tabOrder = Array.from(tabs.keys());
+    return;
+  }
+  tabOrder = tabOrder.filter((id) => tabs.has(id));
+};
+
+const reorderTabOrder = (dragId: string, targetId: string) => {
+  ensureTabOrder();
+  const from = tabOrder.indexOf(dragId);
+  const to = tabOrder.indexOf(targetId);
+  if (from === -1 || to === -1 || from === to) {
+    return;
+  }
+  tabOrder.splice(from, 1);
+  tabOrder.splice(to, 0, dragId);
 };
 
 const renderTabs = () => {
   tabsContainer.innerHTML = "";
+  ensureTabOrder();
   logUi("renderTabs", {
     count: tabs.size,
     activeTabId,
     idleOpen: isIdleScreenOpen(),
     tabs: Array.from(tabs.values()).map((tab) => ({ id: tab.id, title: tab.title, kind: tab.kind }))
   });
-  for (const tab of tabs.values()) {
+  const orderedTabs = tabOrder.length
+    ? tabOrder.map((id) => tabs.get(id)).filter((tab): tab is TabState => Boolean(tab))
+    : Array.from(tabs.values());
+  for (const tab of orderedTabs) {
     const button = document.createElement("button");
     button.className = "tab no-drag";
     button.type = "button";
@@ -1000,6 +1422,7 @@ const renderTabs = () => {
       button.classList.add("active");
     }
     button.dataset.tabId = tab.id;
+    button.draggable = true;
 
     const icon = document.createElement("i");
     icon.className = `fa-solid ${tab.iconClass}`;
@@ -1025,6 +1448,32 @@ const renderTabs = () => {
     button.appendChild(title);
     button.appendChild(close);
     button.addEventListener("click", () => setActiveTab(tab.id, "tab-click"));
+    button.addEventListener("dragstart", (event) => {
+      button.classList.add("dragging");
+      event.dataTransfer?.setData("text/tab-id", tab.id);
+      event.dataTransfer?.setData("text/plain", tab.id);
+    });
+    button.addEventListener("dragend", () => {
+      button.classList.remove("dragging");
+    });
+    button.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      button.classList.add("drag-over");
+    });
+    button.addEventListener("drop", (event) => {
+      event.preventDefault();
+      button.classList.remove("drag-over");
+      const draggedId =
+        event.dataTransfer?.getData("text/tab-id") || event.dataTransfer?.getData("text/plain");
+      if (!draggedId || draggedId === tab.id) {
+        return;
+      }
+      reorderTabOrder(draggedId, tab.id);
+      renderTabs();
+    });
+    button.addEventListener("dragleave", () => {
+      button.classList.remove("drag-over");
+    });
     tabsContainer.appendChild(button);
   }
 };
@@ -1035,14 +1484,20 @@ const setActiveTab = (tabId: string, source = "unknown") => {
     logUi("setActiveTab-missing", { tabId, activeTabId, tabs: Array.from(tabs.keys()) });
     return;
   }
+  if (!tabOrder.includes(tabId)) {
+    tabOrder.push(tabId);
+  }
   const previousTab = activeTabId ? tabs.get(activeTabId) : null;
   logUi("setActiveTab", { source, from: previousTab?.id, to: tabId });
   activeTabId = tabId;
+  markUserActivity(tabId);
   for (const tab of tabs.values()) {
     tab.container.classList.toggle("active", tab.id === tabId);
   }
   welcomePane.classList.remove("is-open");
-  quickIntent.style.display = nextTab.kind === "terminal" ? "inline-flex" : "none";
+  const showTerminalActions = nextTab.kind === "terminal";
+  quickIntent.style.display = showTerminalActions ? "inline-flex" : "none";
+  terminalJump.style.display = showTerminalActions ? "inline-flex" : "none";
   if (previousTab?.kind === "terminal" && previousTab.term && nextTab.kind !== "terminal") {
     setTerminalStdin(previousTab.term, false);
   }
@@ -1060,6 +1515,7 @@ const setActiveTab = (tabId: string, source = "unknown") => {
   if (nextTab.kind === "terminal") {
     fitActiveTerminal();
     focusActiveTerminal();
+    void deliverTimeEchoesForTab(nextTab);
   }
   if (previousTab?.id !== tabId) {
     playClick();
@@ -1073,19 +1529,82 @@ const createTab = async (cwd?: string) => {
   container.className = "terminal-pane";
   container.dataset.tabId = tabInfo.id;
   terminalStack.appendChild(container);
+  const activateFromTerminal = () => {
+    if (activeTabId !== tabInfo.id) {
+      setActiveTab(tabInfo.id, "terminal-focus");
+    }
+  };
+  container.addEventListener("mousedown", activateFromTerminal);
+  container.addEventListener("focusin", activateFromTerminal);
 
-  const term = createTerminal();
+  const term = createTerminal(tabInfo.id);
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(container);
+  markUserActivity(tabInfo.id);
+  container.addEventListener(
+    "wheel",
+    (event) => {
+      const tab = tabs.get(tabInfo.id);
+      if (!tab?.term) {
+        return;
+      }
+      tab.followOutput = false;
+      const delta = Math.sign(event.deltaY) * 3;
+      tab.term.scrollLines(delta);
+      event.preventDefault();
+    },
+    { passive: false, capture: true }
+  );
+  const viewport = container.querySelector(".xterm-viewport");
+  viewport?.addEventListener("wheel", (event) => {
+    const tab = tabs.get(tabInfo.id);
+    if (!tab?.term) {
+      return;
+    }
+    if (event.deltaY < 0) {
+      tab.followOutput = false;
+      return;
+    }
+    window.setTimeout(() => {
+      tab.followOutput = isTerminalAtBottom(tab.term as Terminal);
+    }, 0);
+  });
+  term.onScroll((position) => {
+    const tab = tabs.get(tabInfo.id);
+    if (!tab || !tab.term) {
+      return;
+    }
+    const baseY = (tab.term as unknown as { buffer?: { active?: { baseY: number } } })
+      .buffer?.active?.baseY;
+    if (typeof baseY === "number") {
+      tab.followOutput = position >= baseY;
+    }
+    updateTerminalScrollbar();
+  });
   term.onData((data) => {
+    markUserActivity(tabInfo.id);
     window.vibeflow.write(tabInfo.id, data);
     if (chatIsCollapsed) {
       const tab = tabs.get(tabInfo.id);
       if (!tab) {
         return;
       }
+      if (tab.escapeSequence === undefined) {
+        tab.escapeSequence = null;
+      }
       for (const ch of data) {
+        if (tab.escapeSequence) {
+          tab.escapeSequence += ch;
+          if (/[A-Za-z~]$/.test(tab.escapeSequence) || tab.escapeSequence.length > 16) {
+            tab.escapeSequence = null;
+          }
+          continue;
+        }
+        if (ch === "\u001b") {
+          tab.escapeSequence = "\u001b";
+          continue;
+        }
         if (ch === "\r") {
           if (tab.currentLine.trim()) {
             tab.lastCommand = tab.currentLine.trim();
@@ -1112,11 +1631,16 @@ const createTab = async (cwd?: string) => {
     container,
     chat: [],
     outputBuffer: "",
+    readOutputBuffer: "",
     currentLine: "",
     lastCommand: "",
+    followOutput: true,
     cwd: tabInfo.cwd,
     projectRoot: tabInfo.projectRoot
   });
+  if (!tabOrder.includes(tabInfo.id)) {
+    tabOrder.push(tabInfo.id);
+  }
 
   renderTabs();
   setActiveTab(tabInfo.id, "createTab");
@@ -1134,6 +1658,19 @@ const removeTabLocal = (tabId: string) => {
   }
   tab.container.remove();
   tabs.delete(tabId);
+  tabOrder = tabOrder.filter((id) => id !== tabId);
+  fileActivityByTab.delete(tabId);
+  selectedFileByTab.delete(tabId);
+  for (const key of Array.from(fileActivityTimers.keys())) {
+    if (key.startsWith(`${tabId}:`)) {
+      const timer = fileActivityTimers.get(key);
+      if (timer) {
+        window.clearTimeout(timer);
+        window.clearInterval(timer);
+      }
+      fileActivityTimers.delete(key);
+    }
+  }
 
   if (activeTabId === tabId) {
     const remaining = Array.from(tabs.keys());
@@ -1230,6 +1767,8 @@ const renderChat = () => {
 };
 
 const animateParkedThought = (text: string) => {
+  contextPanel.classList.add("park-pulse");
+  window.setTimeout(() => contextPanel.classList.remove("park-pulse"), 900);
   if (prefersReducedMotion || contextPanel.classList.contains("collapsed")) {
     return;
   }
@@ -1255,10 +1794,11 @@ const animateParkedThought = (text: string) => {
   const animation = fly.animate(
     [
       { transform: "translate(0, 0) scale(1)", opacity: 1 },
-      { transform: `translate(${dx}px, ${dy}px) scale(0.4)`, opacity: 0 }
+      { transform: `translate(${dx * 0.6}px, ${dy * 0.6}px) scale(0.7)`, opacity: 0.7 },
+      { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0 }
     ],
     {
-      duration: 360,
+      duration: 950,
       easing: "cubic-bezier(0.2, 0.8, 0.2, 1)"
     }
   );
@@ -1267,17 +1807,56 @@ const animateParkedThought = (text: string) => {
   };
 };
 
+const showParkedThoughtSkeleton = () => {
+  const item = document.createElement("li");
+  item.className = "thought-skeleton";
+  item.innerHTML = `
+    <span class="skeleton-dot"></span>
+    <span class="skeleton-bar"></span>
+  `;
+  contextThoughts.prepend(item);
+  window.setTimeout(() => {
+    item.remove();
+  }, 1200);
+};
+
+const getTouchedFiles = (session: SessionRecord | LastSession) => {
+  const touches = session.fileTouches || {};
+  return Object.entries(touches)
+    .map(([pathKey, touch]) => ({
+      path: pathKey,
+      reads: touch.reads,
+      writes: touch.writes,
+      lastTouched: touch.lastTouched
+    }))
+    .sort((a, b) => {
+      if (b.writes !== a.writes) {
+        return b.writes - a.writes;
+      }
+      if (b.reads !== a.reads) {
+        return b.reads - a.reads;
+      }
+      return Date.parse(b.lastTouched) - Date.parse(a.lastTouched);
+    });
+};
+
 const buildReceiptText = (session: LastSession) => {
   const flowLabel = flowLabelText[session.flowSummary?.label || "steady"] || "Steady";
   const durationMs = session.flowSummary?.sessionDurationMs || 0;
   const intentCount = session.intent ? 1 : 0;
   const contextCount = session.parkedThoughts.length;
+  const touched = getTouchedFiles(session);
+  const touchedList = touched.slice(0, 8).map((item) => item.path);
   return [
     "VibeFlow Session Receipt",
     `Project: ${session.projectRoot || session.cwd}`,
     `Duration: ${formatDuration(durationMs)} (${flowLabel})`,
     `Intent updates: ${intentCount}`,
-    `Context notes: ${contextCount}`
+    `Context notes: ${contextCount}`,
+    `Intent: ${session.intent?.text || "No intent set"}`,
+    touchedList.length > 0
+      ? `Touched files: ${touchedList.join(", ")}`
+      : "Touched files: none"
   ].join("\n");
 };
 
@@ -1299,12 +1878,124 @@ const showReceipt = (session: LastSession, action?: () => void) => {
   receiptIntents.textContent = intentCount.toString();
   receiptContext.textContent = contextCount.toString();
   receiptFlow.textContent = flowLabel;
+  const touched = getTouchedFiles(session);
+  receiptDiffIntent.textContent = session.intent?.text
+    ? `Intent: ${session.intent.text}`
+    : "Intent: No intent set";
+  receiptDiffFiles.innerHTML = "";
+  if (touched.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "receipt-diff-chip";
+    empty.textContent = "No files touched";
+    receiptDiffFiles.appendChild(empty);
+  } else {
+    const top = touched.slice(0, 4);
+    for (const item of top) {
+      const chip = document.createElement("span");
+      chip.className = "receipt-diff-chip";
+      const reads = item.reads ? `r${item.reads}` : "";
+      const writes = item.writes ? `w${item.writes}` : "";
+      const suffix = [writes, reads].filter(Boolean).join(" ");
+      chip.textContent = suffix ? `${item.path} • ${suffix}` : item.path;
+      receiptDiffFiles.appendChild(chip);
+    }
+    if (touched.length > top.length) {
+      const more = document.createElement("span");
+      more.className = "receipt-diff-chip";
+      more.textContent = `+${touched.length - top.length} more`;
+      receiptDiffFiles.appendChild(more);
+    }
+  }
 };
 
 const hideReceipt = () => {
   receiptOverlay.classList.remove("is-open");
   receiptOverlay.setAttribute("aria-hidden", "true");
   receiptAction = null;
+};
+
+const showTimeEchoOverlay = async (text: string) => {
+  if (!text) {
+    return;
+  }
+  timeEchoText.textContent = text;
+  timeEchoScreen.classList.add("is-open");
+  timeEchoScreen.setAttribute("aria-hidden", "false");
+  await new Promise((resolve) => window.setTimeout(resolve, 1400));
+  timeEchoScreen.classList.remove("is-open");
+  timeEchoScreen.setAttribute("aria-hidden", "true");
+};
+
+const renderTimeEchoes = (tab: TabState | null, animate = false) => {
+  if (!tab || tab.kind !== "terminal") {
+    contextEchoes.style.display = "none";
+    contextEchoList.innerHTML = "";
+    return;
+  }
+  const echoes = tab.timeEchoes || [];
+  if (echoes.length === 0) {
+    contextEchoes.style.display = "none";
+    contextEchoList.innerHTML = "";
+    return;
+  }
+  contextEchoes.style.display = "grid";
+  contextEchoList.innerHTML = "";
+  echoes.forEach((echo, index) => {
+    const item = document.createElement("div");
+    item.className = "echo-item";
+    if (animate) {
+      item.classList.add("echo-enter");
+      item.style.animationDelay = `${index * 120}ms`;
+    }
+    const text = document.createElement("div");
+    text.className = "echo-text";
+    text.textContent = echo.text;
+    const actions = document.createElement("div");
+    actions.className = "echo-actions";
+    const parkButton = document.createElement("button");
+    parkButton.type = "button";
+    parkButton.className = "echo-action primary";
+    parkButton.textContent = "Park";
+    parkButton.addEventListener("click", () => {
+      if (!activeTabId) {
+        return;
+      }
+      window.vibeflow.addParkedThought(activeTabId, echo.text);
+      tab.timeEchoes = (tab.timeEchoes || []).filter((item) => item.id !== echo.id);
+      renderTimeEchoes(tab);
+      void refreshContext();
+      playTick();
+    });
+    const discardButton = document.createElement("button");
+    discardButton.type = "button";
+    discardButton.className = "echo-action danger";
+    discardButton.textContent = "Discard";
+    discardButton.addEventListener("click", () => {
+      tab.timeEchoes = (tab.timeEchoes || []).filter((item) => item.id !== echo.id);
+      renderTimeEchoes(tab);
+      playClick();
+    });
+    actions.appendChild(parkButton);
+    actions.appendChild(discardButton);
+    item.appendChild(text);
+    item.appendChild(actions);
+    contextEchoList.appendChild(item);
+  });
+};
+
+const deliverTimeEchoesForTab = async (tab: TabState) => {
+  if (tab.kind !== "terminal" || tab.echoesConsumed) {
+    return;
+  }
+  tab.echoesConsumed = true;
+  const repoKey = tab.projectRoot || tab.cwd || null;
+  const echoes = await window.vibeflow.consumeTimeEchoes(repoKey);
+  if (!echoes || echoes.length === 0) {
+    renderTimeEchoes(tab);
+    return;
+  }
+  tab.timeEchoes = echoes;
+  renderTimeEchoes(tab, true);
 };
 
 const refreshRecentRepos = async () => {
@@ -1342,7 +2033,7 @@ const refreshRecentRepos = async () => {
 };
 
 const refreshSettingsData = async () => {
-  if (!settingsSessionSelect || !settingsRepoSelect) {
+  if (!settingsSessionSelect || !settingsRepoSelect || !settingsVibeTraceRepoSelect) {
     return;
   }
   const sessions: SessionList = await window.vibeflow.getAllSessions();
@@ -1406,17 +2097,22 @@ const refreshSettingsData = async () => {
   );
 
   settingsRepoSelect.innerHTML = "";
+  settingsVibeTraceRepoSelect.innerHTML = "";
   if (repoMap.size === 0) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "No repo context available";
     settingsRepoSelect.appendChild(option);
     settingsRepoSelect.disabled = true;
+    const traceOption = option.cloneNode(true) as HTMLOptionElement;
+    settingsVibeTraceRepoSelect.appendChild(traceOption);
+    settingsVibeTraceRepoSelect.disabled = true;
     if (settingsDeleteRepoButton) {
       settingsDeleteRepoButton.disabled = true;
     }
   } else {
     settingsRepoSelect.disabled = false;
+    settingsVibeTraceRepoSelect.disabled = false;
     if (settingsDeleteRepoButton) {
       settingsDeleteRepoButton.disabled = false;
     }
@@ -1428,8 +2124,11 @@ const refreshSettingsData = async () => {
       option.value = repo.key;
       option.textContent = `${repo.name} (${repo.count} sessions)`;
       settingsRepoSelect.appendChild(option);
+      const traceOption = option.cloneNode(true) as HTMLOptionElement;
+      settingsVibeTraceRepoSelect.appendChild(traceOption);
     }
   }
+  void updateVibeTraceToggle();
 };
 
 const refreshAboutVersion = async () => {
@@ -1594,7 +2293,7 @@ const renderHistoryLists = () => {
     resumeButton.className = "primary";
     resumeButton.textContent = "Resume";
     resumeButton.addEventListener("click", () => {
-      showResumeForSession(session);
+      void showResumeForSession(session);
       playClick();
     });
     actions.appendChild(detailsButton);
@@ -1621,6 +2320,28 @@ const renderHistoryDetailsInline = (session: SessionRecord) => {
   const parked = session.parkedThoughts || [];
   const intentText = session.intent?.text || "No intent recorded.";
   const intentTime = session.intent?.setAt ? formatTime(session.intent.setAt) : "N/A";
+  const touched = getTouchedFiles(session);
+  const topTouched = touched.slice(0, 6);
+  const diffChips = topTouched
+    .map((item) => {
+      const reads = item.reads ? `r${item.reads}` : "";
+      const writes = item.writes ? `w${item.writes}` : "";
+      const suffix = [writes, reads].filter(Boolean).join(" ");
+      const label = suffix ? `${item.path} • ${suffix}` : item.path;
+      return `<span class="history-diff-chip">${label}</span>`;
+    })
+    .join("");
+  const diffMore =
+    touched.length > topTouched.length
+      ? `<span class="history-diff-chip">+${touched.length - topTouched.length} more</span>`
+      : "";
+  const diffEmpty = touched.length === 0
+    ? "<span class=\"history-diff-chip\">No files touched</span>"
+    : "";
+  const echoes = session.timeEchoes || (session.timeEcho ? [session.timeEcho] : []);
+  const echoList = echoes.length
+    ? echoes.map((echo) => `<span class="history-diff-chip">${echo.text}</span>`).join("")
+    : "<span class=\"history-diff-chip\">No time echoes</span>";
 
   const tags = [
     `Flow: ${flowLabel}`,
@@ -1641,6 +2362,15 @@ const renderHistoryDetailsInline = (session: SessionRecord) => {
         <div class="history-details-label">Intent</div>
         <div>${intentText}</div>
         <div class="history-item-meta">Set at ${intentTime}</div>
+      </div>
+      <div class="history-details-row">
+        <div class="history-details-label">Context Diff</div>
+        <div class="history-item-meta">Intent vs touched files</div>
+        <div class="history-diff-files">${diffEmpty || diffChips + diffMore}</div>
+      </div>
+      <div class="history-details-row">
+        <div class="history-details-label">Time Echoes</div>
+        <div class="history-diff-files">${echoList}</div>
       </div>
       <div class="history-details-row">
         <div class="history-details-label">Parked Thoughts</div>
@@ -1679,12 +2409,13 @@ const sendChatCommand = () => {
   if (!tab || tab.kind !== "terminal" || !tab.shellKind) {
     return;
   }
+  markUserActivity(activeTabId);
   const now = new Date();
   const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   tab.chat.push({ text: value, time });
   renderChat();
   const command = buildCommandForShell(value, tab.shellKind);
-  window.vibeflow.write(activeTabId, `${command}\r`);
+  sendCommandToTerminal(activeTabId, command, tab.shellKind);
   chatInput.value = "";
   focusActiveTerminal();
   playClick();
@@ -1698,6 +2429,7 @@ const saveIntentFromChat = () => {
   if (!value) {
     return;
   }
+  markUserActivity(activeTabId);
   window.vibeflow.setIntent(activeTabId, value);
   chatInput.value = "";
   void refreshContext();
@@ -1712,16 +2444,18 @@ const saveIntentFromTerminal = () => {
   if (!tab || tab.kind !== "terminal") {
     return;
   }
-  const value = (tab.currentLine || "").trim() || (tab.lastCommand || "").trim();
+  const value = sanitizeTerminalText(tab.currentLine || "") ||
+    sanitizeTerminalText(tab.lastCommand || "");
   if (!value) {
     return;
   }
+  markUserActivity(activeTabId);
   window.vibeflow.setIntent(activeTabId, value);
   void refreshContext();
   playClick();
 };
 
-type OverlayMode = "intent" | "thought" | null;
+type OverlayMode = "intent" | "thought" | "echo" | null;
 let overlayMode: OverlayMode = null;
 
 const openOverlay = (mode: OverlayMode) => {
@@ -1734,13 +2468,24 @@ const openOverlay = (mode: OverlayMode) => {
   overlay.setAttribute("aria-hidden", "false");
   overlayInput.value = "";
   overlayInput.placeholder =
-    mode === "intent" ? "What are you trying to achieve?" : "Capture a parked thought...";
+    mode === "intent"
+      ? "What are you trying to achieve?"
+      : mode === "echo"
+      ? "Send a message to future you..."
+      : "Capture a parked thought...";
   const popupTitle = document.getElementById("vf-popup-title");
   const popupIcon = document.getElementById("vf-popup-icon");
   if (popupTitle && popupIcon) {
-    popupTitle.textContent = mode === "intent" ? "Set Intent" : "Parked Thought";
-    popupIcon.className =
-      mode === "intent" ? "fa-solid fa-bullseye" : "fa-regular fa-note-sticky";
+    if (mode === "intent") {
+      popupTitle.textContent = "Set Intent";
+      popupIcon.className = "fa-solid fa-bullseye";
+    } else if (mode === "echo") {
+      popupTitle.textContent = "Time Echo";
+      popupIcon.className = "fa-regular fa-hourglass";
+    } else {
+      popupTitle.textContent = "Parked Thought";
+      popupIcon.className = "fa-regular fa-note-sticky";
+    }
   }
   setTimeout(() => overlayInput.focus(), 0);
 };
@@ -1754,7 +2499,7 @@ const closeOverlay = () => {
   focusActiveTerminal();
 };
 
-overlayInput.addEventListener("keydown", (event) => {
+overlayInput.addEventListener("keydown", async (event) => {
   event.stopPropagation();
   if (event.key === "Enter") {
     event.preventDefault();
@@ -1762,13 +2507,30 @@ overlayInput.addEventListener("keydown", (event) => {
     if (value && overlayTabId) {
       if (overlayMode === "intent") {
         window.vibeflow.setIntent(overlayTabId, value);
+        markUserActivity(overlayTabId);
+        playClick();
+      } else if (overlayMode === "echo") {
+        await window.vibeflow.setTimeEcho(overlayTabId, value);
+        markUserActivity(overlayTabId);
         playClick();
       } else if (overlayMode === "thought") {
         animateParkedThought(value);
+        showParkedThoughtSkeleton();
         window.vibeflow.addParkedThought(overlayTabId, value);
+        markUserActivity(overlayTabId);
         playTick();
       }
-      void refreshContext();
+      if (overlayMode === "thought") {
+        window.setTimeout(() => {
+          void refreshContext();
+        }, 900);
+      } else if (overlayMode === "echo") {
+        window.setTimeout(() => {
+          void refreshContext();
+        }, 300);
+      } else {
+        void refreshContext();
+      }
     }
     closeOverlay();
   } else if (event.key === "Escape") {
@@ -1803,11 +2565,13 @@ confirmOverlay.addEventListener("click", (event) => {
   }
 });
 
-window.addEventListener("keydown", (event) => {
-  if (overlayMode) {
-    return;
-  }
-  const target = event.target as HTMLElement | null;
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (overlayMode) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
   if (target && (target.tagName === "INPUT" || target.isContentEditable)) {
     return;
   }
@@ -1815,6 +2579,9 @@ window.addEventListener("keydown", (event) => {
   if (event.altKey && key === "i") {
     event.preventDefault();
     openOverlay("intent");
+  } else if (event.altKey && key === "e") {
+    event.preventDefault();
+    openOverlay("echo");
   } else if (event.altKey && key === "p") {
     event.preventDefault();
     openOverlay("thought");
@@ -1822,7 +2589,9 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     void selectRepoAndCreateTab();
   }
-});
+  },
+  { capture: true }
+);
 
 const suggestNextStep = (session: LastSession) => {
   if (!session) {
@@ -1870,13 +2639,43 @@ const refreshContext = async () => {
   contextIntent.textContent = session.intent?.text || "No intent set.";
   const summary = session.flowSummary;
   if (summary) {
-    contextFlowTime.textContent = formatClock(summary.sessionDurationMs);
-    if (session.paused) {
-      contextFlowLabel.textContent = "Paused";
-      contextFlowLabel.style.color = "#94a3b8";
-      contextFlowBar.style.width = "10%";
+    const now = Date.now();
+    const startMs = Date.parse(session.startedAt);
+    if (activeTab.sessionStartedAt !== session.startedAt) {
+      activeTab.sessionStartedAt = session.startedAt;
+      activeTab.displayElapsedMs = summary.totalActiveMs || 0;
+      activeTab.lastDisplayTick = now;
+    }
+    if (activeTab.displayElapsedMs === undefined) {
+      activeTab.displayElapsedMs = summary.totalActiveMs || 0;
+      activeTab.lastDisplayTick = now;
+    }
+    if (activeTab.lastDisplayTick === undefined) {
+      activeTab.lastDisplayTick = now;
+    }
+    const lastUser = activeTab.lastUserActionAt || 0;
+    const lastOutput = activeTab.lastOutputAt || 0;
+    const lastSignal = Math.max(lastUser, lastOutput, startMs);
+    const tabIdleFor = Math.max(0, now - lastSignal);
+    const pausedOrIdle = tabIdleFor >= UI_IDLE_THRESHOLD_MS;
+    if (!pausedOrIdle) {
+      activeTab.displayElapsedMs += Math.max(0, now - activeTab.lastDisplayTick);
+    }
+    activeTab.lastDisplayTick = now;
+    if (pausedOrIdle) {
+      const displayMs = Math.max(0, activeTab.displayElapsedMs || 0);
+      contextFlowTime.textContent = formatClock(displayMs);
+      const isPaused = tabIdleFor >= UI_PAUSED_THRESHOLD_MS;
+      contextFlowLabel.textContent = isPaused ? "Paused" : "No activity";
+      contextFlowLabel.style.color = isPaused ? "#94a3b8" : "#6b7280";
+      contextFlowIcon.className = isPaused
+        ? "fa-regular fa-circle-pause"
+        : "fa-regular fa-moon";
+      contextFlowBar.style.width = isPaused ? "10%" : "8%";
     } else {
+      contextFlowTime.textContent = formatClock(activeTab.displayElapsedMs || 0);
       contextFlowLabel.textContent = flowLabelText[summary.label] || "Steady";
+      contextFlowIcon.className = "fa-solid fa-bolt";
       const flowColor =
         summary.label === "deep-flow"
           ? "#4ade80"
@@ -1896,36 +2695,71 @@ const refreshContext = async () => {
     contextFlowTime.textContent = "00:00";
     contextFlowLabel.textContent = "Steady";
     contextFlowLabel.style.color = "#9ca3af";
+    contextFlowIcon.className = "fa-solid fa-bolt";
     contextFlowBar.style.width = "20%";
   }
 
+  const repoKey = activeTab.projectRoot || activeTab.cwd || null;
+  const repoThoughts = repoKey ? await window.vibeflow.getRepoParkedThoughts(repoKey) : [];
+  const thoughtsToShow = repoThoughts.length > 0 ? repoThoughts : session.parkedThoughts;
+
   contextThoughts.innerHTML = "";
-  if (session.parkedThoughts.length === 0) {
+  if (thoughtsToShow.length === 0) {
     const empty = document.createElement("li");
     empty.textContent = "No parked thoughts";
     contextThoughts.appendChild(empty);
   } else {
-    for (const thought of session.parkedThoughts.slice(0, 4)) {
+    for (const thought of thoughtsToShow.slice(0, 4)) {
       const li = document.createElement("li");
       const icon = document.createElement("i");
       icon.className = "fa-regular fa-note-sticky";
       icon.style.color = "#a78bfa";
       const text = document.createElement("span");
       text.textContent = thought.text;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "thoughts-delete";
+      remove.title = "Delete parked thought";
+      remove.innerHTML = "<i class=\"fa-solid fa-xmark\"></i>";
+      remove.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        if (!repoKey || !thought.id) {
+          return;
+        }
+        await window.vibeflow.deleteRepoParkedThought(repoKey, thought.id);
+        void refreshContext();
+        playClick();
+      });
       li.appendChild(icon);
       li.appendChild(text);
+      li.appendChild(remove);
       contextThoughts.appendChild(li);
     }
   }
+  renderTimeEchoes(activeTab);
 };
 
-const showResumeForSession = (session: SessionRecord) => {
+const showResumeForSession = async (session: SessionRecord) => {
+  resumeSession = session;
   resumeOverlay.dataset.sessionId = session.id;
   resumeOverlay.dataset.sessionPath = session.projectRoot || session.cwd;
   resumeOverlay.classList.add("is-open");
   resumeOverlay.setAttribute("aria-hidden", "false");
   const projectName = titleFromPath(session.projectRoot, session.cwd);
-  resumeSub.textContent = `You were last active in ${projectName}. Here is where you left off.`;
+  resumeSub.textContent = "Here is where you left off.";
+  resumeRepo.textContent = projectName;
+  resumeTrace.style.display = "none";
+  resumeTrace.textContent = "";
+  const trace = await window.vibeflow.readVibeTrace(session.projectRoot || session.cwd);
+  if (trace) {
+    const intent = trace.intent?.text || "No intent";
+    const duration = trace.flowSummary?.sessionDurationMs
+      ? formatDuration(trace.flowSummary.sessionDurationMs)
+      : "Unknown duration";
+    const parkedCount = trace.parkedThoughts?.length || 0;
+    resumeTrace.textContent = `VibeTrace found • ${intent} • ${duration} • ${parkedCount} notes`;
+    resumeTrace.style.display = "inline-flex";
+  }
   resumeDuration.textContent = session.flowSummary
     ? formatHms(session.flowSummary.sessionDurationMs)
     : "00:00:00";
@@ -1947,7 +2781,7 @@ const openResume = async () => {
   if (!session) {
     return;
   }
-  showResumeForSession(session);
+  await showResumeForSession(session);
 };
 
 const animateResumeToContext = async () => {
@@ -2003,10 +2837,18 @@ resumeContinue.addEventListener("click", async () => {
     const existing = findTerminalTabByPath(targetPath);
     if (existing) {
       setActiveTab(existing.id, "resume-continue");
+      contextPanel.classList.add("resume-pulse");
+      window.setTimeout(() => {
+        contextPanel.classList.remove("resume-pulse");
+      }, 700);
       return;
     }
     if (!activeTabId || tabs.get(activeTabId)?.kind !== "terminal") {
       await createTab(targetPath);
+      contextPanel.classList.add("resume-pulse");
+      window.setTimeout(() => {
+        contextPanel.classList.remove("resume-pulse");
+      }, 700);
       return;
     }
   }
@@ -2080,6 +2922,10 @@ window.vibeflow.onPtyExit((tabId) => {
   removeTabLocal(tabId);
 });
 
+window.vibeflow.onRepoFileActivity(({ tabId, relPath }) => {
+  markFileActivity(tabId, relPath, "write");
+});
+
 tabAddButton.addEventListener("click", () => {
   const idleOpen = isIdleScreenOpen();
   logUi("tabAddClick", { activeTabId, idleOpen });
@@ -2133,6 +2979,50 @@ quickIntent.addEventListener("click", () => {
   saveIntentFromTerminal();
 });
 
+terminalJump.addEventListener("click", () => {
+  scrollActiveTerminalToBottom();
+  playClick();
+});
+
+terminalScrollbarThumb.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+  isScrollDragging = true;
+  const trackRect = terminalScrollbar.getBoundingClientRect();
+  const startY = event.clientY;
+  const thumbRect = terminalScrollbarThumb.getBoundingClientRect();
+  const startOffset = thumbRect.top - trackRect.top;
+
+  const onMove = (moveEvent: MouseEvent) => {
+    if (!isScrollDragging) {
+      return;
+    }
+    const delta = moveEvent.clientY - startY;
+    const trackHeight = trackRect.height - 4;
+    const thumbHeight = thumbRect.height;
+    const next = Math.max(0, Math.min(trackHeight - thumbHeight, startOffset + delta));
+    const ratio = (trackHeight - thumbHeight) > 0 ? next / (trackHeight - thumbHeight) : 0;
+    scrollTerminalToRatio(ratio);
+  };
+
+  const onUp = () => {
+    isScrollDragging = false;
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+});
+
+terminalScrollbar.addEventListener("mousedown", (event) => {
+  if (event.target === terminalScrollbarThumb) {
+    return;
+  }
+  const trackRect = terminalScrollbar.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (event.clientY - trackRect.top) / trackRect.height));
+  scrollTerminalToRatio(ratio);
+});
+
 contextToggle.addEventListener("click", () => {
   contextPanel.classList.toggle("collapsed");
   contextIcon.className = contextPanel.classList.contains("collapsed")
@@ -2144,6 +3034,10 @@ contextToggle.addEventListener("click", () => {
 
 contextIntentAction.addEventListener("click", () => {
   openOverlay("intent");
+  playClick();
+});
+contextEchoAction.addEventListener("click", () => {
+  openOverlay("echo");
   playClick();
 });
 contextThoughtAction.addEventListener("click", () => {

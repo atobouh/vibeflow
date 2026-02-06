@@ -10,12 +10,30 @@ contextBridge.exposeInMainWorld("vibeflow", {
   setIntent: (tabId: string, text: string) => ipcRenderer.send("session-intent", tabId, text),
   addParkedThought: (tabId: string, text: string) =>
     ipcRenderer.send("session-thought", tabId, text),
+  recordFileRead: (tabId: string, relPath: string) =>
+    ipcRenderer.send("session-file-read", tabId, relPath),
+  setTimeEcho: (tabId: string, text: string) =>
+    ipcRenderer.invoke("session-time-echo", tabId, text),
+  markTimeEchoDelivered: (sessionId: string) =>
+    ipcRenderer.invoke("session-echo-delivered", sessionId),
   getLastSession: () => ipcRenderer.invoke("session-get-last"),
   getActiveSession: (tabId: string) => ipcRenderer.invoke("session-get-active", tabId),
   getRecentSessions: () => ipcRenderer.invoke("session-get-recent"),
   getAllSessions: () => ipcRenderer.invoke("session-get-all"),
   deleteSession: (sessionId: string) => ipcRenderer.invoke("session-delete", sessionId),
   deleteRepoContext: (repoKey: string) => ipcRenderer.invoke("session-delete-repo", repoKey),
+  getVibeTraceInclude: (repoKey: string | null) =>
+    ipcRenderer.invoke("vibetrace-get-include", repoKey),
+  setVibeTraceInclude: (repoKey: string | null, include: boolean) =>
+    ipcRenderer.invoke("vibetrace-set-include", repoKey, include),
+  readVibeTrace: (repoKey: string | null) =>
+    ipcRenderer.invoke("vibetrace-read", repoKey),
+  consumeTimeEchoes: (repoKey: string | null) =>
+    ipcRenderer.invoke("time-echo-consume", repoKey),
+  getRepoParkedThoughts: (repoKey: string | null) =>
+    ipcRenderer.invoke("repo-parked-thoughts", repoKey),
+  deleteRepoParkedThought: (repoKey: string | null, thoughtId: string) =>
+    ipcRenderer.invoke("repo-parked-thought-delete", repoKey, thoughtId),
   getAppVersion: () => ipcRenderer.invoke("app-get-version"),
   openExternal: (url: string) => ipcRenderer.invoke("app-open-external", url),
   getRepoTree: (tabId: string) => ipcRenderer.invoke("repo-get-tree", tabId),
@@ -40,6 +58,18 @@ contextBridge.exposeInMainWorld("vibeflow", {
     };
     ipcRenderer.on("pty-exit", handler);
     return () => ipcRenderer.removeListener("pty-exit", handler);
+  },
+  onRepoFileActivity: (
+    callback: (payload: { tabId: string; relPath: string; type: "write" }) => void
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: { tabId: string; relPath: string; type: "write" }
+    ) => {
+      callback(payload);
+    };
+    ipcRenderer.on("repo-file-activity", handler);
+    return () => ipcRenderer.removeListener("repo-file-activity", handler);
   },
   windowControl: (action: "minimize" | "maximize" | "restore" | "close") =>
     ipcRenderer.send("window-control", action),

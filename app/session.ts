@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 
 type IdleGap = {
   startAt: string;
@@ -13,8 +14,24 @@ type IntentEntry = {
 };
 
 type ParkedThought = {
+  id: string;
   text: string;
   createdAt: string;
+};
+
+type FileTouch = {
+  reads: number;
+  writes: number;
+  lastTouched: string;
+};
+
+type TimeEcho = {
+  id: string;
+  text: string;
+  createdAt: string;
+  deliverAt: string;
+  deliveredAt?: string;
+  sourceSessionId?: string;
 };
 
 type FlowSummary = {
@@ -29,6 +46,48 @@ type FlowSummary = {
   label: "deep-flow" | "drift" | "context-loss" | "steady";
 };
 
+type VibeTracePayload = {
+  version: 1;
+  generatedAt: string;
+  sessionId: string;
+  projectRoot: string | null;
+  cwd: string;
+  startedAt: string;
+  endedAt?: string;
+  intent?: IntentEntry;
+  intentTimeline: IntentEntry[];
+  parkedThoughts: ParkedThought[];
+  flowSummary?: FlowSummary;
+  endReason?: string;
+  commitHash?: string;
+  touchedFiles: Array<{
+    path: string;
+    reads: number;
+    writes: number;
+    lastTouched: string;
+  }>;
+  contextDiff: {
+    intent: string | null;
+    touchedFiles: Array<{
+      path: string;
+      reads: number;
+      writes: number;
+    }>;
+  };
+};
+
+type AppConfig = {
+  vibeTraceIncludeByRepo: Record<string, boolean>;
+  pendingTimeEchoesByRepo: Record<string, TimeEcho[]>;
+  repoParkedThoughtsByRepo: Record<string, ParkedThought[]>;
+};
+
+const DEFAULT_CONFIG: AppConfig = {
+  vibeTraceIncludeByRepo: {},
+  pendingTimeEchoesByRepo: {},
+  repoParkedThoughtsByRepo: {}
+};
+
 export type SessionRecord = {
   id: string;
   tabId: string;
@@ -39,7 +98,12 @@ export type SessionRecord = {
   activity: string[];
   idleGaps: IdleGap[];
   intent?: IntentEntry;
+  intentTimeline?: IntentEntry[];
   parkedThoughts: ParkedThought[];
+  timeEchoes?: TimeEcho[];
+  timeEcho?: TimeEcho;
+  vibeTrace?: VibeTracePayload;
+  fileTouches?: Record<string, FileTouch>;
   flowSummary?: FlowSummary;
   endReason?: string;
   idleForMs?: number;
@@ -163,16 +227,76 @@ function computeFlowSummary(session: SessionRecord, endAtMs: number): FlowSummar
   };
 }
 
+function normalizeRelPath(value: string) {
+  return value.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
+}
+
+function buildTouchedFiles(session: SessionRecord) {
+  const touches = session.fileTouches || {};
+  return Object.entries(touches)
+    .map(([pathKey, touch]) => ({
+      path: pathKey,
+      reads: touch.reads,
+      writes: touch.writes,
+      lastTouched: touch.lastTouched
+    }))
+    .sort((a, b) => {
+      if (b.writes !== a.writes) {
+        return b.writes - a.writes;
+      }
+      if (b.reads !== a.reads) {
+        return b.reads - a.reads;
+      }
+      return Date.parse(b.lastTouched) - Date.parse(a.lastTouched);
+    });
+}
+
+function buildVibeTracePayload(session: SessionRecord): VibeTracePayload {
+  const touchedFiles = buildTouchedFiles(session);
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    sessionId: session.id,
+    projectRoot: session.projectRoot,
+    cwd: session.cwd,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    intent: session.intent,
+    intentTimeline: session.intentTimeline || [],
+    parkedThoughts: session.parkedThoughts,
+    flowSummary: session.flowSummary,
+    endReason: session.endReason,
+    touchedFiles,
+    contextDiff: {
+      intent: session.intent?.text || null,
+      touchedFiles: touchedFiles.map((item) => ({
+        path: item.path,
+        reads: item.reads,
+        writes: item.writes
+      }))
+    }
+  };
+}
+
 export class SessionManager {
   private state: SessionState;
   private saveTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private dataDir: string;
   private sessionsFile: string;
+  private configFile: string;
+  private vibeTraceIncludeByRepo: Record<string, boolean> = {};
+  private pendingTimeEchoesByRepo: Record<string, TimeEcho[]> = {};
+  private repoParkedThoughtsByRepo: Record<string, ParkedThought[]> = {};
 
   constructor(dataDir?: string) {
     this.dataDir = dataDir || path.join(process.cwd(), "data");
     this.sessionsFile = path.join(this.dataDir, "sessions.json");
+    this.configFile = path.join(this.dataDir, "config.json");
+    const config = this.loadConfig();
+    this.vibeTraceIncludeByRepo = config.vibeTraceIncludeByRepo;
+    this.pendingTimeEchoesByRepo = config.pendingTimeEchoesByRepo;
+    this.repoParkedThoughtsByRepo = config.repoParkedThoughtsByRepo;
     this.state = {
       sessions: this.loadSessions(),
       tabs: new Map()
@@ -192,7 +316,9 @@ export class SessionManager {
       startedAt: new Date(now).toISOString(),
       activity: [new Date(now).toISOString()],
       idleGaps: [],
-      parkedThoughts: []
+      parkedThoughts: [],
+      intentTimeline: [],
+      fileTouches: {}
     };
 
     this.state.sessions.push(session);
@@ -217,10 +343,15 @@ export class SessionManager {
       return;
     }
     const now = Date.now();
-    tab.session.intent = {
+    const entry = {
       text: cleaned,
       setAt: new Date(now).toISOString()
     };
+    tab.session.intent = entry;
+    if (!tab.session.intentTimeline) {
+      tab.session.intentTimeline = [];
+    }
+    tab.session.intentTimeline.push(entry);
     this.recordActivity(tabId, "intent");
     this.saveSoon();
   }
@@ -235,12 +366,71 @@ export class SessionManager {
       return;
     }
     const now = Date.now();
-    tab.session.parkedThoughts.push({
+    const thought = {
+      id: createSessionId(),
       text: cleaned,
       createdAt: new Date(now).toISOString()
-    });
+    };
+    tab.session.parkedThoughts.push(thought);
+    const repoKey = tab.session.projectRoot || tab.session.cwd;
+    if (repoKey) {
+      if (!this.repoParkedThoughtsByRepo[repoKey]) {
+        this.repoParkedThoughtsByRepo[repoKey] = [];
+      }
+      this.repoParkedThoughtsByRepo[repoKey].push(thought);
+      this.saveConfig();
+    }
     this.recordActivity(tabId, "parked-thought");
     this.saveSoon();
+  }
+
+  setTimeEcho(tabId: string, text: string): boolean {
+    const cleaned = text.trim();
+    if (!cleaned) {
+      return false;
+    }
+    const tab = this.getOrStart(tabId, "time-echo");
+    if (!tab) {
+      return false;
+    }
+    if (!tab.session.timeEchoes) {
+      tab.session.timeEchoes = [];
+    }
+    const now = new Date();
+    tab.session.timeEchoes.push({
+      id: createSessionId(),
+      text: cleaned,
+      createdAt: now.toISOString(),
+      deliverAt: now.toISOString(),
+      sourceSessionId: tab.session.id
+    });
+    this.recordActivity(tabId, "time-echo");
+    this.saveSoon();
+    return true;
+  }
+
+  markTimeEchoDelivered(sessionId: string): boolean {
+    const session = this.state.sessions.find((item) => item.id === sessionId);
+    if (!session) {
+      return false;
+    }
+    const now = new Date().toISOString();
+    let updated = false;
+    if (session.timeEchoes && session.timeEchoes.length > 0) {
+      for (const echo of session.timeEchoes) {
+        if (!echo.deliveredAt) {
+          echo.deliveredAt = now;
+          updated = true;
+        }
+      }
+    } else if (session.timeEcho && !session.timeEcho.deliveredAt) {
+      session.timeEcho.deliveredAt = now;
+      updated = true;
+    }
+    if (updated) {
+      this.saveSoon(true);
+    }
+    return updated;
   }
 
   recordActivity(tabId: string, source: string) {
@@ -263,6 +453,49 @@ export class SessionManager {
     }
   }
 
+  recordFileTouch(tabId: string, relPath: string, type: "read" | "write") {
+    const cleaned = normalizeRelPath(relPath);
+    if (!cleaned) {
+      return;
+    }
+    const tab = this.getOrStart(tabId, `file-${type}`);
+    if (!tab) {
+      return;
+    }
+    if (!tab.session.fileTouches) {
+      tab.session.fileTouches = {};
+    }
+    const now = new Date().toISOString();
+    const existing = tab.session.fileTouches[cleaned] || {
+      reads: 0,
+      writes: 0,
+      lastTouched: now
+    };
+    if (type === "read") {
+      existing.reads += 1;
+    } else {
+      existing.writes += 1;
+    }
+    existing.lastTouched = now;
+    tab.session.fileTouches[cleaned] = existing;
+    this.recordActivity(tabId, `file-${type}`);
+    this.saveSoon();
+  }
+
+  private queueTimeEchoes(session: SessionRecord) {
+    const repoKey = session.projectRoot || session.cwd;
+    if (!repoKey) {
+      return;
+    }
+    const echoes = session.timeEchoes || (session.timeEcho ? [session.timeEcho] : []);
+    if (echoes.length === 0) {
+      return;
+    }
+    const existing = this.pendingTimeEchoesByRepo[repoKey] || [];
+    this.pendingTimeEchoesByRepo[repoKey] = existing.concat(echoes);
+    this.saveConfig();
+  }
+
   endSession(tabId: string, reason: string) {
     const tab = this.state.tabs.get(tabId);
     if (!tab) {
@@ -275,6 +508,9 @@ export class SessionManager {
     tab.session.endedAt = new Date(now).toISOString();
     tab.session.endReason = reason;
     tab.session.flowSummary = computeFlowSummary(tab.session, now);
+    this.queueTimeEchoes(tab.session);
+    tab.session.vibeTrace = buildVibeTracePayload(tab.session);
+    this.writeVibeTrace(tab.session);
     this.state.tabs.delete(tabId);
     if (this.state.tabs.size === 0) {
       this.stopIdleTimer();
@@ -313,6 +549,23 @@ export class SessionManager {
       }
     }
     return null;
+  }
+
+  getLastSession(): SessionRecord | null {
+    let latest: SessionRecord | null = null;
+    let latestTime = 0;
+
+    for (const session of this.state.sessions) {
+      const activity = session.activity?.[session.activity.length - 1];
+      const candidate = activity || session.endedAt || session.startedAt;
+      const candidateTime = Date.parse(candidate);
+      if (!Number.isNaN(candidateTime) && candidateTime >= latestTime) {
+        latest = session;
+        latestTime = candidateTime;
+      }
+    }
+
+    return latest;
   }
 
   getRecentSessions(limit = 3): RecentSession[] {
@@ -384,7 +637,119 @@ export class SessionManager {
     if (removed > 0) {
       this.saveSoon(true);
     }
+    if (this.vibeTraceIncludeByRepo[repoKey]) {
+      delete this.vibeTraceIncludeByRepo[repoKey];
+      this.saveConfig();
+    }
+    if (this.pendingTimeEchoesByRepo[repoKey]) {
+      delete this.pendingTimeEchoesByRepo[repoKey];
+      this.saveConfig();
+    }
+    if (this.repoParkedThoughtsByRepo[repoKey]) {
+      delete this.repoParkedThoughtsByRepo[repoKey];
+      this.saveConfig();
+    }
     return removed;
+  }
+
+  getVibeTraceInclude(repoKey: string | null): boolean {
+    if (!repoKey) {
+      return false;
+    }
+    return this.vibeTraceIncludeByRepo[repoKey] === true;
+  }
+
+  setVibeTraceInclude(repoKey: string | null, include: boolean): boolean {
+    if (!repoKey) {
+      return false;
+    }
+    if (include) {
+      this.vibeTraceIncludeByRepo[repoKey] = true;
+    } else {
+      delete this.vibeTraceIncludeByRepo[repoKey];
+    }
+    this.saveConfig();
+    this.syncGitignore(repoKey, include);
+    return include;
+  }
+
+  readVibeTrace(repoKey: string | null): VibeTracePayload | null {
+    if (!repoKey) {
+      return null;
+    }
+    try {
+      const tracePath = path.join(repoKey, ".vibeflow", "trace.json");
+      if (!fs.existsSync(tracePath)) {
+        return null;
+      }
+      const raw = fs.readFileSync(tracePath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+      return parsed as VibeTracePayload;
+    } catch {
+      return null;
+    }
+  }
+
+  consumeTimeEchoes(repoKey: string | null): TimeEcho[] {
+    if (!repoKey) {
+      return [];
+    }
+    const echoes = this.pendingTimeEchoesByRepo[repoKey] || [];
+    if (echoes.length === 0) {
+      return [];
+    }
+    delete this.pendingTimeEchoesByRepo[repoKey];
+    this.saveConfig();
+    return echoes;
+  }
+
+  getRepoParkedThoughts(repoKey: string | null): ParkedThought[] {
+    if (!repoKey) {
+      return [];
+    }
+    const list = this.repoParkedThoughtsByRepo[repoKey] || [];
+    let changed = false;
+    const normalized = list.map((thought) => {
+      if (thought.id) {
+        return thought;
+      }
+      changed = true;
+      return {
+        ...thought,
+        id: createSessionId()
+      };
+    });
+    if (changed) {
+      this.repoParkedThoughtsByRepo[repoKey] = normalized;
+      this.saveConfig();
+    }
+    return normalized;
+  }
+
+  deleteRepoParkedThought(repoKey: string | null, thoughtId: string): boolean {
+    if (!repoKey || !thoughtId) {
+      return false;
+    }
+    const list = this.repoParkedThoughtsByRepo[repoKey] || [];
+    const next = list.filter((thought) => thought.id !== thoughtId);
+    if (next.length === list.length) {
+      return false;
+    }
+    this.repoParkedThoughtsByRepo[repoKey] = next;
+    for (const session of this.state.sessions) {
+      if (!session.parkedThoughts || session.parkedThoughts.length === 0) {
+        continue;
+      }
+      session.parkedThoughts = session.parkedThoughts.filter(
+        (thought) => thought.id !== thoughtId
+      );
+    }
+    this.saveConfig();
+    this.saveSoon(true);
+    return true;
   }
 
   private getOrStart(tabId: string, reason: string) {
@@ -439,6 +804,115 @@ export class SessionManager {
     }
   }
 
+  private loadConfig(): AppConfig {
+    try {
+      if (!fs.existsSync(this.configFile)) {
+        return DEFAULT_CONFIG;
+      }
+      const raw = fs.readFileSync(this.configFile, "utf8");
+      const parsed = JSON.parse(raw) as Partial<AppConfig>;
+      return {
+        vibeTraceIncludeByRepo:
+          parsed.vibeTraceIncludeByRepo && typeof parsed.vibeTraceIncludeByRepo === "object"
+            ? parsed.vibeTraceIncludeByRepo
+            : DEFAULT_CONFIG.vibeTraceIncludeByRepo,
+        pendingTimeEchoesByRepo:
+          parsed.pendingTimeEchoesByRepo && typeof parsed.pendingTimeEchoesByRepo === "object"
+            ? parsed.pendingTimeEchoesByRepo
+            : DEFAULT_CONFIG.pendingTimeEchoesByRepo,
+        repoParkedThoughtsByRepo:
+          parsed.repoParkedThoughtsByRepo && typeof parsed.repoParkedThoughtsByRepo === "object"
+            ? parsed.repoParkedThoughtsByRepo
+            : DEFAULT_CONFIG.repoParkedThoughtsByRepo
+      };
+    } catch {
+      return DEFAULT_CONFIG;
+    }
+  }
+
+  private saveConfig() {
+    this.ensureDataDir();
+    const payload: AppConfig = {
+      vibeTraceIncludeByRepo: this.vibeTraceIncludeByRepo,
+      pendingTimeEchoesByRepo: this.pendingTimeEchoesByRepo,
+      repoParkedThoughtsByRepo: this.repoParkedThoughtsByRepo
+    };
+    fs.writeFileSync(this.configFile, JSON.stringify(payload, null, 2), "utf8");
+  }
+
+  private getGitHead(repoRoot: string): string | null {
+    try {
+      const output = execSync("git rev-parse HEAD", {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "ignore"]
+      })
+        .toString()
+        .trim();
+      return output || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeVibeTrace(session: SessionRecord) {
+    const repoRoot = session.projectRoot || session.cwd;
+    if (!repoRoot) {
+      return;
+    }
+    try {
+      const traceDir = path.join(repoRoot, ".vibeflow");
+      fs.mkdirSync(traceDir, { recursive: true });
+      const payload = session.vibeTrace || buildVibeTracePayload(session);
+      const gitHead = session.projectRoot ? this.getGitHead(session.projectRoot) : null;
+      if (gitHead) {
+        payload.commitHash = gitHead;
+      }
+      session.vibeTrace = payload;
+      const tracePath = path.join(traceDir, "trace.json");
+      fs.writeFileSync(tracePath, JSON.stringify(payload, null, 2), "utf8");
+      if (session.projectRoot) {
+        const include = this.getVibeTraceInclude(session.projectRoot);
+        this.syncGitignore(session.projectRoot, include);
+      }
+    } catch {
+      // ignore write failures
+    }
+  }
+
+  private syncGitignore(repoRoot: string, include: boolean) {
+    const gitDir = path.join(repoRoot, ".git");
+    if (!fs.existsSync(gitDir)) {
+      return;
+    }
+    const gitignorePath = path.join(repoRoot, ".gitignore");
+    const entry = ".vibeflow/";
+    if (!fs.existsSync(gitignorePath)) {
+      if (!include) {
+        fs.writeFileSync(gitignorePath, `${entry}\n`, "utf8");
+      }
+      return;
+    }
+    const raw = fs.readFileSync(gitignorePath, "utf8");
+    const lines = raw.split(/\r?\n/);
+    const filtered = lines.filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return true;
+      }
+      return (
+        trimmed !== ".vibeflow" &&
+        trimmed !== entry &&
+        trimmed !== "/.vibeflow" &&
+        trimmed !== "/.vibeflow/"
+      );
+    });
+    if (!include) {
+      filtered.push(entry);
+    }
+    const next = filtered.join("\n").replace(/\n+$/, "");
+    fs.writeFileSync(gitignorePath, next ? `${next}\n` : `${entry}\n`, "utf8");
+  }
+
   private saveSoon(force = false) {
     if (force) {
       if (this.saveTimer) {
@@ -483,7 +957,26 @@ export class SessionManager {
           activity: safeRecord.activity || [],
           idleGaps: safeRecord.idleGaps || [],
           intent: safeRecord.intent,
-          parkedThoughts: safeRecord.parkedThoughts || [],
+          intentTimeline: safeRecord.intentTimeline || [],
+          parkedThoughts: (safeRecord.parkedThoughts || []).map((thought) => ({
+            id: (thought as ParkedThought).id || createSessionId(),
+            text: thought.text || "",
+            createdAt: thought.createdAt || new Date(0).toISOString()
+          })),
+          timeEchoes: (
+            safeRecord.timeEchoes ||
+            (safeRecord.timeEcho ? [safeRecord.timeEcho] : [])
+          ).map((echo) => ({
+            id: (echo as TimeEcho).id || createSessionId(),
+            text: echo.text || "",
+            createdAt: echo.createdAt || new Date(0).toISOString(),
+            deliverAt: echo.deliverAt || new Date(0).toISOString(),
+            deliveredAt: echo.deliveredAt,
+            sourceSessionId: echo.sourceSessionId
+          })),
+          timeEcho: safeRecord.timeEcho,
+          vibeTrace: safeRecord.vibeTrace,
+          fileTouches: safeRecord.fileTouches || {},
           flowSummary: safeRecord.flowSummary,
           endReason: safeRecord.endReason
         };

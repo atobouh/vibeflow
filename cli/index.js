@@ -73,15 +73,44 @@ const saveSessions = (sessions) => {
 const loadState = () => {
   const data = loadJson(STATE_FILE, {
     activeByRepo: {},
-    idleTimeoutMinutes: DEFAULT_IDLE_MINUTES
+    idleTimeoutMinutes: DEFAULT_IDLE_MINUTES,
+    pendingTimeEchoesByRepo: {},
+    deliveredTimeEchoesByRepo: {},
+    repoParkedThoughtsByRepo: {}
   });
   if (!data || typeof data !== "object") {
-    return { activeByRepo: {}, idleTimeoutMinutes: DEFAULT_IDLE_MINUTES };
+    return {
+      activeByRepo: {},
+      idleTimeoutMinutes: DEFAULT_IDLE_MINUTES,
+      pendingTimeEchoesByRepo: {},
+      deliveredTimeEchoesByRepo: {},
+      repoParkedThoughtsByRepo: {}
+    };
   }
+  const pending = data.pendingTimeEchoesByRepo || {};
+  const delivered = data.deliveredTimeEchoesByRepo || {};
+  const parked = data.repoParkedThoughtsByRepo || {};
+  const normalizeEchoMap = (map) =>
+    Object.fromEntries(
+      Object.entries(map).map(([key, list]) => [
+        key,
+        Array.isArray(list) ? list.map(normalizeTimeEcho) : []
+      ])
+    );
+  const normalizeThoughtMap = (map) =>
+    Object.fromEntries(
+      Object.entries(map).map(([key, list]) => [
+        key,
+        Array.isArray(list) ? list.map(normalizeParkedThought) : []
+      ])
+    );
   return {
     activeByRepo: data.activeByRepo || {},
     idleTimeoutMinutes:
-      typeof data.idleTimeoutMinutes === "number" ? data.idleTimeoutMinutes : DEFAULT_IDLE_MINUTES
+      typeof data.idleTimeoutMinutes === "number" ? data.idleTimeoutMinutes : DEFAULT_IDLE_MINUTES,
+    pendingTimeEchoesByRepo: normalizeEchoMap(pending),
+    deliveredTimeEchoesByRepo: normalizeEchoMap(delivered),
+    repoParkedThoughtsByRepo: normalizeThoughtMap(parked)
   };
 };
 
@@ -168,6 +197,23 @@ const formatTime = (iso) => {
   }
 };
 
+const createId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeParkedThought = (thought) => ({
+  id: thought?.id || createId(),
+  text: thought?.text || "",
+  createdAt: thought?.createdAt || nowIso()
+});
+
+const normalizeTimeEcho = (echo) => ({
+  id: echo?.id || createId(),
+  text: echo?.text || "",
+  createdAt: echo?.createdAt || nowIso(),
+  deliverAt: echo?.deliverAt || nowIso(),
+  deliveredAt: echo?.deliveredAt,
+  sourceSessionId: echo?.sourceSessionId
+});
+
 const findSessionById = (sessions, id) => sessions.find((s) => s.id === id);
 
 const getLastSessionForRepo = (sessions, repoKey) => {
@@ -187,6 +233,10 @@ Usage:
   vf start [path]        Start a session
   vf intent "text"       Set intent for current repo session
   vf park "note"         Park a thought
+  vf echo "message"      Queue a time echo for next session
+  vf echo list           List queued/delivered echoes
+  vf echo park <id>      Park a delivered echo
+  vf echo discard <id>   Discard a delivered echo
   vf status              Show current session status
   vf status --watch      Live session timer
   vf timer               Live session timer (alias)
@@ -215,6 +265,7 @@ const printSessionSummary = (session, active = false) => {
   console.log(`Duration: ${formatDuration(durationMs)}`);
   console.log(`Intent: ${session.intent?.text || "Not set"}`);
   console.log(`Parked: ${(session.parkedThoughts || []).length}`);
+  console.log(`Time Echoes: ${(session.timeEchoes || []).length}`);
 };
 
 const getIdleTimeoutMs = (state) => {
@@ -233,7 +284,125 @@ const normalizeSession = (session) => {
   if (!session.parkedThoughts) {
     session.parkedThoughts = [];
   }
+  session.parkedThoughts = session.parkedThoughts.map(normalizeParkedThought);
+  if (!session.timeEchoes) {
+    session.timeEchoes = session.timeEcho ? [normalizeTimeEcho(session.timeEcho)] : [];
+  } else {
+    session.timeEchoes = session.timeEchoes.map(normalizeTimeEcho);
+  }
   return session;
+};
+
+const ensureGitignore = (repoKey) => {
+  const gitDir = path.join(repoKey, ".git");
+  if (!fs.existsSync(gitDir)) {
+    return;
+  }
+  const gitignorePath = path.join(repoKey, ".gitignore");
+  const entry = ".vibeflow/";
+  if (!fs.existsSync(gitignorePath)) {
+    fs.writeFileSync(gitignorePath, `${entry}\n`, "utf8");
+    return;
+  }
+  const raw = fs.readFileSync(gitignorePath, "utf8");
+  const lines = raw.split(/\r?\n/);
+  if (lines.some((line) => line.trim() === entry || line.trim() === ".vibeflow")) {
+    return;
+  }
+  lines.push(entry);
+  fs.writeFileSync(gitignorePath, `${lines.join("\n").replace(/\n+$/, "")}\n`, "utf8");
+};
+
+const buildTracePayload = (session) => {
+  const durationMs = session.endedAt
+    ? Date.parse(session.endedAt) - Date.parse(session.startedAt)
+    : Date.now() - Date.parse(session.startedAt);
+  return {
+    version: 1,
+    generatedAt: nowIso(),
+    sessionId: session.id,
+    repoKey: session.repoKey,
+    repoName: session.repoName,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt || null,
+    durationMs,
+    intent: session.intent || null,
+    parkedThoughts: session.parkedThoughts || [],
+    timeEchoes: session.timeEchoes || []
+  };
+};
+
+const writeTrace = (session) => {
+  try {
+    const dir = path.join(session.repoKey, ".vibeflow");
+    fs.mkdirSync(dir, { recursive: true });
+    const payload = buildTracePayload(session);
+    fs.writeFileSync(path.join(dir, "trace.json"), JSON.stringify(payload, null, 2), "utf8");
+    ensureGitignore(session.repoKey);
+  } catch {
+    // ignore trace failures
+  }
+};
+
+const readTrace = (repoKey) => {
+  try {
+    const filePath = path.join(repoKey, ".vibeflow", "trace.json");
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    const raw = fs.readFileSync(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const queueTimeEchoes = (session, state) => {
+  if (!session.timeEchoes || session.timeEchoes.length === 0) {
+    return;
+  }
+  const existing = state.pendingTimeEchoesByRepo[session.repoKey] || [];
+  state.pendingTimeEchoesByRepo[session.repoKey] = existing.concat(session.timeEchoes);
+};
+
+const deliverPendingEchoes = (repoKey, state) => {
+  const pending = state.pendingTimeEchoesByRepo[repoKey] || [];
+  if (pending.length === 0) {
+    return [];
+  }
+  delete state.pendingTimeEchoesByRepo[repoKey];
+  state.deliveredTimeEchoesByRepo[repoKey] = pending;
+  return pending;
+};
+
+const clearDeliveredEchoes = (repoKey, state) => {
+  if (state.deliveredTimeEchoesByRepo[repoKey]) {
+    delete state.deliveredTimeEchoesByRepo[repoKey];
+  }
+};
+
+const showEchoes = (echoes) => {
+  if (!echoes || echoes.length === 0) {
+    return;
+  }
+  console.log(c.magenta("Time Echoes:"));
+  echoes.forEach((echo) => {
+    console.log(`- ${echo.id}: ${echo.text}`);
+  });
+  console.log(c.gray("Use `vf echo park <id>` to park or `vf echo discard <id>` to delete."));
+};
+
+const showTraceSummary = (trace) => {
+  if (!trace) {
+    return;
+  }
+  console.log(c.blue("VibeTrace found"));
+  console.log(`Last intent: ${trace.intent?.text || "Not set"}`);
+  if (trace.durationMs) {
+    console.log(`Last session duration: ${formatDuration(trace.durationMs)}`);
+  }
+  console.log(`Parked thoughts: ${(trace.parkedThoughts || []).length}`);
+  console.log(`Time echoes: ${(trace.timeEchoes || []).length}`);
 };
 
 const ensureActiveSession = (sessions, state, repoKey) => {
@@ -252,6 +421,8 @@ const ensureActiveSession = (sessions, state, repoKey) => {
     if (Date.now() - last > timeoutMs) {
       session.endedAt = nowIso();
       session.endedReason = "idle";
+      queueTimeEchoes(session, state);
+      writeTrace(session);
       saveSessions(sessions);
       delete state.activeByRepo[repoKey];
       saveState(state);
@@ -302,6 +473,14 @@ const startSession = (targetPath, watch) => {
   console.log(c.dim("Terminal IDE - Intent - Context - Flow\n"));
   console.log(c.green("Session started."));
   printSessionSummary(session, true);
+  const trace = readTrace(repoKey);
+  showTraceSummary(trace);
+  clearDeliveredEchoes(repoKey, state);
+  const echoes = deliverPendingEchoes(repoKey, state);
+  if (echoes.length > 0) {
+    showEchoes(echoes);
+    saveState(state);
+  }
   if (watch) {
     renderLiveTimer(session);
     return;
@@ -353,9 +532,15 @@ const parkThought = (text) => {
     console.error("No active session. Run `vf start` first.");
     return;
   }
-  active.session.parkedThoughts.push({ text: value, createdAt: nowIso() });
+  const thought = normalizeParkedThought({ text: value, createdAt: nowIso() });
+  active.session.parkedThoughts.push(thought);
+  if (!state.repoParkedThoughtsByRepo[repoKey]) {
+    state.repoParkedThoughtsByRepo[repoKey] = [];
+  }
+  state.repoParkedThoughtsByRepo[repoKey].push(thought);
   active.session.lastActivityAt = nowIso();
   saveSessions(sessions);
+  saveState(state);
   console.log("Thought parked.");
 };
 
@@ -434,20 +619,26 @@ const resume = (targetPath) => {
   if (active.session) {
     console.log("Active session:");
     printSessionSummary(active.session, true);
-    return;
-  }
-  if (active.autoEnded && active.endedSession) {
+  } else if (active.autoEnded && active.endedSession) {
     console.log("Last session (auto-ended due to inactivity):");
     printSessionSummary(active.endedSession, false);
-    return;
+  } else {
+    const last = getLastSessionForRepo(sessions, repoKey);
+    if (!last) {
+      console.log("No sessions found for this repo.");
+    } else {
+      console.log("Last session:");
+      printSessionSummary(last, false);
+    }
   }
-  const last = getLastSessionForRepo(sessions, repoKey);
-  if (!last) {
-    console.log("No sessions found for this repo.");
-    return;
+  const trace = readTrace(repoKey);
+  showTraceSummary(trace);
+  clearDeliveredEchoes(repoKey, state);
+  const echoes = deliverPendingEchoes(repoKey, state);
+  if (echoes.length > 0) {
+    showEchoes(echoes);
+    saveState(state);
   }
-  console.log("Last session:");
-  printSessionSummary(last, false);
 };
 
 const history = (targetPath) => {
@@ -489,6 +680,9 @@ const end = () => {
     return;
   }
   active.session.endedAt = nowIso();
+  active.session.endedReason = "ended";
+  queueTimeEchoes(active.session, state);
+  writeTrace(active.session);
   saveSessions(sessions);
   delete state.activeByRepo[repoKey];
   saveState(state);
@@ -523,6 +717,97 @@ const receipt = (id) => {
   console.log(`Duration: ${formatDuration(durationMs)}`);
   console.log(`Intent: ${session.intent?.text || "Not set"}`);
   console.log(`Parked: ${(session.parkedThoughts || []).length}`);
+  console.log(`Time Echoes: ${(session.timeEchoes || []).length}`);
+};
+
+const echoCommand = (argsList) => {
+  const repoKey = getRepoKey(process.cwd());
+  const sessions = loadSessions();
+  const state = loadState();
+  const sub = argsList[0];
+  if (!sub || sub === "list") {
+    const pending = state.pendingTimeEchoesByRepo[repoKey] || [];
+    const delivered = state.deliveredTimeEchoesByRepo[repoKey] || [];
+    if (pending.length === 0 && delivered.length === 0) {
+      console.log("No time echoes for this repo.");
+      return;
+    }
+    if (pending.length > 0) {
+      console.log(c.blue("Queued (next session):"));
+      pending.forEach((echo) => {
+        console.log(`- ${echo.id}: ${echo.text}`);
+      });
+    }
+    if (delivered.length > 0) {
+      console.log(c.magenta("Delivered (waiting for action):"));
+      delivered.forEach((echo) => {
+        console.log(`- ${echo.id}: ${echo.text}`);
+      });
+      console.log(c.gray("Use `vf echo park <id>` or `vf echo discard <id>`."));
+    }
+    return;
+  }
+  if (sub === "park" || sub === "discard") {
+    const id = argsList[1];
+    if (!id) {
+      console.error("Echo id is required.");
+      return;
+    }
+    const delivered = state.deliveredTimeEchoesByRepo[repoKey] || [];
+    const target = delivered.find((echo) => echo.id === id);
+    if (!target) {
+      console.error("Echo not found or already handled.");
+      return;
+    }
+    state.deliveredTimeEchoesByRepo[repoKey] = delivered.filter((echo) => echo.id !== id);
+    if (sub === "park") {
+      if (!state.repoParkedThoughtsByRepo[repoKey]) {
+        state.repoParkedThoughtsByRepo[repoKey] = [];
+      }
+      const thought = normalizeParkedThought({ text: target.text, createdAt: nowIso() });
+      state.repoParkedThoughtsByRepo[repoKey].push(thought);
+      const active = ensureActiveSession(sessions, state, repoKey);
+      if (active.session) {
+        active.session.parkedThoughts.push(thought);
+        active.session.lastActivityAt = nowIso();
+        saveSessions(sessions);
+      }
+      saveState(state);
+      console.log("Echo parked as a thought.");
+      return;
+    }
+    saveState(state);
+    console.log("Echo discarded.");
+    return;
+  }
+  const text = argsList.join(" ").trim();
+  if (!text) {
+    console.error("Echo message is required.");
+    return;
+  }
+  const active = ensureActiveSession(sessions, state, repoKey);
+  if (!active.session) {
+    if (active.autoEnded) {
+      console.error("Session auto-ended due to inactivity. Run `vf start` to begin a new one.");
+      printSessionSummary(active.endedSession, false);
+      return;
+    }
+    console.error("No active session. Run `vf start` first.");
+    return;
+  }
+  const echo = normalizeTimeEcho({
+    text,
+    createdAt: nowIso(),
+    deliverAt: nowIso(),
+    sourceSessionId: active.session.id
+  });
+  if (!active.session.timeEchoes) {
+    active.session.timeEchoes = [];
+  }
+  active.session.timeEchoes.push(echo);
+  active.session.lastActivityAt = nowIso();
+  saveSessions(sessions);
+  console.log("Time Echo queued for next session.");
 };
 
 const parseIdleMinutes = (value) => {
@@ -642,6 +927,9 @@ switch (command) {
     break;
   case "receipt":
     receipt(args[1]);
+    break;
+  case "echo":
+    echoCommand(args.slice(1));
     break;
   case "help":
   case "-h":

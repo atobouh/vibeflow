@@ -14,9 +14,58 @@ type TabInfo = {
 
 let mainWindow: BrowserWindow | null = null;
 const tabs = new Map<string, TabInfo>();
+const repoWatchers = new Map<string, fs.FSWatcher>();
 let sessionManager: SessionManager | null = null;
 
 type ShellKind = "powershell" | "cmd" | "bash" | "zsh" | "fish" | "unknown";
+
+function shouldIgnoreWatchPath(relPath: string) {
+  const normalized = relPath.replace(/\\/g, "/");
+  return (
+    normalized.startsWith(".git/") ||
+    normalized.includes("/.git/") ||
+    normalized.startsWith("node_modules/") ||
+    normalized.includes("/node_modules/") ||
+    normalized.startsWith("dist/") ||
+    normalized.includes("/dist/") ||
+    normalized.startsWith("build/") ||
+    normalized.includes("/build/") ||
+    normalized.startsWith("release/") ||
+    normalized.includes("/release/")
+  );
+}
+
+function stopRepoWatcher(tabId: string) {
+  const watcher = repoWatchers.get(tabId);
+  if (watcher) {
+    watcher.close();
+    repoWatchers.delete(tabId);
+  }
+}
+
+function startRepoWatcher(tabId: string, root: string) {
+  stopRepoWatcher(tabId);
+  try {
+    const watcher = fs.watch(root, { recursive: true }, (_eventType, filename) => {
+      if (!filename) {
+        return;
+      }
+      const relPath = path.normalize(filename.toString());
+      if (shouldIgnoreWatchPath(relPath)) {
+        return;
+      }
+      sessionManager?.recordFileTouch(tabId, relPath, "write");
+      mainWindow?.webContents.send("repo-file-activity", {
+        tabId,
+        relPath,
+        type: "write"
+      });
+    });
+    repoWatchers.set(tabId, watcher);
+  } catch {
+    // Ignore watcher failures (e.g., permissions or unsupported FS)
+  }
+}
 
 function getShellKind(shell: string): ShellKind {
   const lower = shell.toLowerCase();
@@ -117,6 +166,7 @@ function createTab(cwd = process.cwd()) {
   pty.onExit(() => {
     sessionManager.endSession(id, "pty-exit");
     tabs.delete(id);
+    stopRepoWatcher(id);
     mainWindow?.webContents.send("pty-exit", { tabId: id });
   });
 
@@ -126,6 +176,7 @@ function createTab(cwd = process.cwd()) {
   if (tab) {
     tab.projectRoot = projectRoot;
   }
+  startRepoWatcher(id, projectRoot || cwd);
   return {
     id,
     cwd,
@@ -142,6 +193,7 @@ function closeTab(tabId: string, reason: string) {
   if (!tab) {
     return;
   }
+  stopRepoWatcher(tabId);
   tab.pty.kill();
   tabs.delete(tabId);
   sessionManager.endSession(tabId, reason);
@@ -183,8 +235,20 @@ ipcMain.on("session-thought", (_event, tabId: string, text: string) => {
   sessionManager?.addParkedThought(tabId, text);
 });
 
+ipcMain.on("session-file-read", (_event, tabId: string, relPath: string) => {
+  sessionManager?.recordFileTouch(tabId, relPath, "read");
+});
+
+ipcMain.handle("session-time-echo", (_event, tabId: string, text: string) => {
+  return sessionManager?.setTimeEcho(tabId, text) || false;
+});
+
+ipcMain.handle("session-echo-delivered", (_event, sessionId: string) => {
+  return sessionManager?.markTimeEchoDelivered(sessionId) || false;
+});
+
 ipcMain.handle("session-get-last", () => {
-  return sessionManager?.getLastEndedSession() || null;
+  return sessionManager?.getLastSession() || null;
 });
 
 ipcMain.handle("session-get-active", (_event, tabId: string) => {
@@ -206,6 +270,36 @@ ipcMain.handle("session-delete", (_event, sessionId: string) => {
 ipcMain.handle("session-delete-repo", (_event, repoKey: string) => {
   return sessionManager?.deleteRepoContext(repoKey) || 0;
 });
+
+ipcMain.handle("vibetrace-get-include", (_event, repoKey: string | null) => {
+  return sessionManager?.getVibeTraceInclude(repoKey) || false;
+});
+
+ipcMain.handle(
+  "vibetrace-set-include",
+  (_event, repoKey: string | null, include: boolean) => {
+    return sessionManager?.setVibeTraceInclude(repoKey, include) || false;
+  }
+);
+
+ipcMain.handle("vibetrace-read", (_event, repoKey: string | null) => {
+  return sessionManager?.readVibeTrace(repoKey) || null;
+});
+
+ipcMain.handle("time-echo-consume", (_event, repoKey: string | null) => {
+  return sessionManager?.consumeTimeEchoes(repoKey) || [];
+});
+
+ipcMain.handle("repo-parked-thoughts", (_event, repoKey: string | null) => {
+  return sessionManager?.getRepoParkedThoughts(repoKey) || [];
+});
+
+ipcMain.handle(
+  "repo-parked-thought-delete",
+  (_event, repoKey: string | null, thoughtId: string) => {
+    return sessionManager?.deleteRepoParkedThought(repoKey, thoughtId) || false;
+  }
+);
 
 ipcMain.handle("app-get-version", () => {
   return app.getVersion();
