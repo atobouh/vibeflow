@@ -37,6 +37,9 @@
 
 - Intent-first workflow keeps sessions grounded and focused.
 - Live context panel preserves decisions, commands, and flow state.
+- Time Echoes surface what mattered when you return.
+- VibeTrace writes session context into the repo when you end a session.
+- Context Diff pairs intent with touched files for clearer handoffs.
 - Warp-inspired layout with tabs, terminal, and contextual sidecar.
 - Local-first sessions for speed, privacy, and offline work.
 - CLI companion for lightweight session tracking anywhere.
@@ -64,6 +67,18 @@
       <td>Live timer, gentle inactivity handling, and clarity on status.</td>
     </tr>
     <tr>
+      <td><strong>Time Echoes</strong></td>
+      <td>Messages from your last session appear when you return.</td>
+    </tr>
+    <tr>
+      <td><strong>VibeTrace</strong></td>
+      <td>Context snapshots written to <code>.vibeflow/trace.json</code> per repo.</td>
+    </tr>
+    <tr>
+      <td><strong>Context Diff</strong></td>
+      <td>Intent plus touched files shown in receipts and history.</td>
+    </tr>
+    <tr>
       <td><strong>History</strong></td>
       <td>Per-repo sessions with quick resume and clear summaries.</td>
     </tr>
@@ -77,6 +92,8 @@
 vf start
 vf intent "Ship the release"
 vf park "Follow up with QA on installer"
+vf echo "Don’t break login"
+vf resume
 vf status
 vf end
 </code></pre>
