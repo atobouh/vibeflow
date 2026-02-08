@@ -24,6 +24,13 @@ npm publish --access public
 vf start [path]
 vf intent "text"
 vf park "note"
+vf stt
+vf stt --copy
+vf stt --intent
+vf stt --park
+vf stt --echo
+vf stt --device "Microphone Name"
+vf stt setup
 vf status
 vf status --watch
 vf timer
@@ -33,6 +40,12 @@ vf end
 vf receipt [id]
 vf help
 ```
+
+## Speech to Text (STT)
+- `vf stt` starts recording and stops on Enter.
+- `vf stt setup` downloads Whisper CLI + model (Windows/macOS/Linux).
+- Needs `unzip` on macOS/Linux (or install whisper.cpp manually and set `VF_WHISPER_BIN` + `VF_WHISPER_MODEL`).
+- Set microphone with `vf stt --device "<name>"` (Windows) or `vf stt --device <index>` (macOS).
 
 ## Data location
 Stored locally in your user config directory. Override with `VF_DATA_DIR`.

@@ -205,6 +205,28 @@
         background: rgba(255, 255, 255, 0.05);
       }
 
+      .tab.is-colored {
+        border: 1px solid color-mix(in srgb, var(--tab-accent, #3b82f6) 50%, transparent);
+        background: color-mix(in srgb, var(--tab-accent, #3b82f6) 16%, transparent);
+        color: #f5f5f5;
+      }
+
+      .tab.is-colored:hover {
+        background: color-mix(in srgb, var(--tab-accent, #3b82f6) 22%, transparent);
+      }
+
+      .tab .tab-activity {
+        font-size: 10px;
+        color: #60a5fa;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+
+      .tab .tab-activity.is-active {
+        opacity: 1;
+        animation: tab-spin 1s linear infinite;
+      }
+
       .tab-add {
         width: 28px;
         height: 28px;
@@ -222,6 +244,97 @@
       .tab-add:hover {
         color: #fff;
         background: rgba(255, 255, 255, 0.05);
+      }
+
+      @keyframes tab-spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .tab-color-menu {
+        position: fixed;
+        z-index: 80;
+        background: rgba(10, 10, 12, 0.98);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+        border-radius: 10px;
+        padding: 10px;
+        min-width: 160px;
+        display: none;
+        gap: 10px;
+        flex-direction: column;
+      }
+
+      .tab-color-menu.is-open {
+        display: flex;
+      }
+
+      .tab-color-title {
+        font-size: 11px;
+        color: #9ca3af;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .tab-color-options {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .tab-color-swatch {
+        width: 36px;
+        height: 22px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .tab-color-swatch:hover {
+        transform: translateY(-1px) scale(1.02);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+      }
+
+      .tab-color-clear {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #cbd5f5;
+        border-radius: 8px;
+        font-size: 11px;
+        padding: 6px 8px;
+        cursor: pointer;
+        text-align: center;
+      }
+
+      .tab-color-clear:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .terminal-attach {
+        height: 34px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.02);
+        color: #9ca3af;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+      }
+
+      .terminal-attach:hover {
+        color: #facc15;
+        border-color: rgba(250, 204, 21, 0.4);
+        background: rgba(250, 204, 21, 0.08);
       }
 
       .title-controls {
@@ -934,7 +1047,7 @@
 
       #terminal-stack {
         position: absolute;
-        inset: 0;
+        inset: 18px 20px 24px;
       }
 
       .terminal-pane {
@@ -949,7 +1062,7 @@
 
       .terminal-pane .xterm {
         height: 100%;
-        padding: 18px 20px 24px;
+        padding: 0;
       }
 
       .terminal-pane .xterm-viewport {
@@ -1517,6 +1630,35 @@
         cursor: not-allowed;
       }
 
+      .cmd-attach {
+        border: none;
+        background: transparent;
+        color: #6b7280;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 6px;
+      }
+
+      .cmd-attach:hover {
+        color: #facc15;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .cmd-attach[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .cmd-attach .attach-terminal-icon {
+        font-size: 9px;
+        color: #94a3b8;
+        position: absolute;
+        right: 2px;
+        bottom: 2px;
+        opacity: 0.8;
+        pointer-events: none;
+      }
+
       .cmd-divider {
         width: 1px;
         height: 16px;
@@ -1581,6 +1723,112 @@
         padding: 0 16px;
         font-size: 11px;
         color: #9ca3af;
+      }
+
+      .voice-overlay {
+        position: fixed;
+        left: 50%;
+        bottom: 120px;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 70;
+        pointer-events: none;
+      }
+
+      .voice-overlay.is-open {
+        display: flex;
+      }
+
+      .voice-overlay.is-processing .voice-pill {
+        border-color: rgba(245, 158, 11, 0.45);
+        background: rgba(20, 14, 8, 0.92);
+      }
+
+      .voice-overlay.is-processing .voice-bars span {
+        background: linear-gradient(180deg, #fcd34d, #f59e0b);
+        animation: voicePulse 1.6s ease-in-out infinite;
+      }
+
+      .voice-overlay.is-processing .voice-text {
+        color: #fde68a;
+      }
+
+      .voice-pill {
+        padding: 10px 16px;
+        border-radius: 999px;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        background: rgba(12, 15, 22, 0.9);
+        box-shadow: 0 18px 45px rgba(10, 10, 20, 0.45);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #e2e8f0;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .voice-bars {
+        display: flex;
+        align-items: flex-end;
+        gap: 4px;
+      }
+
+      .voice-bars span {
+        width: 4px;
+        height: 10px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #93c5fd, #60a5fa);
+        animation: voiceWave 1.2s ease-in-out infinite;
+      }
+
+      .voice-bars span:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+
+      .voice-bars span:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+
+      .voice-bars span:nth-child(4) {
+        animation-delay: 0.45s;
+      }
+
+      @keyframes voiceWave {
+        0%,
+        100% {
+          height: 8px;
+          opacity: 0.6;
+        }
+        50% {
+          height: 18px;
+          opacity: 1;
+        }
+      }
+
+      @keyframes voicePulse {
+        0%,
+        100% {
+          height: 6px;
+          opacity: 0.55;
+        }
+        50% {
+          height: 14px;
+          opacity: 1;
+        }
+      }
+
+      .voice-text {
+        font-size: 11px;
+        color: #cbd5f5;
+        text-transform: none;
+        letter-spacing: 0.02em;
+        max-width: 260px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .overlay-backdrop {
@@ -2282,7 +2530,12 @@
             </div>
           </div>
         </div>
-        <div class="intent-actions">
+        <div class="intent-actions" id="vf-terminal-actions">
+          <input id="vf-terminal-file" type="file" accept="image/*" style="display: none;" />
+          <button id="vf-terminal-attach" class="terminal-attach" type="button" title="Attach image to terminal">
+            <i class="fa-regular fa-image"></i>
+            Attach
+          </button>
           <button id="vf-terminal-jump" class="terminal-jump" type="button" title="Jump to bottom">
             <i class="fa-solid fa-arrow-down"></i>
             Jump
@@ -2368,13 +2621,31 @@
       </aside>
     </main>
 
+    <div id="vf-voice-overlay" class="voice-overlay" aria-hidden="true">
+      <div class="voice-pill">
+        <div class="voice-bars">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div>Listening...</div>
+        <div id="vf-voice-text" class="voice-text"></div>
+      </div>
+    </div>
+
     <footer id="command-dock" class="command-dock">
       <div id="vf-chat-log" class="command-log"></div>
       <div class="command-input">
         <div class="cmd-input-wrapper">
           <div class="cmd-prompt">></div>
           <input id="vf-chat-text" type="text" placeholder="Send command to terminal..." />
+          <input id="vf-chat-file" type="file" accept="image/*" style="display: none;" />
           <div class="cmd-actions">
+            <button id="vf-chat-attach" class="cmd-attach" type="button" title="Attach image (terminal only)" style="position: relative;">
+              <i class="fa-regular fa-image"></i>
+              <i class="fa-solid fa-terminal attach-terminal-icon"></i>
+            </button>
             <button id="vf-chat-agent" class="cmd-agent" type="button" title="Save as intent">
               <i class="fa-solid fa-bookmark"></i>
             </button>
@@ -2404,6 +2675,12 @@
         </button>
       </div>
     </footer>
+
+    <div id="vf-tab-color-menu" class="tab-color-menu" aria-hidden="true">
+      <div class="tab-color-title">Tab color</div>
+      <div class="tab-color-options" id="vf-tab-color-options"></div>
+      <div class="tab-color-clear" id="vf-tab-color-clear">Clear color</div>
+    </div>
 
     <div id="intent-popup" class="overlay-backdrop" style="position: fixed; inset: 0; display: none; align-items: flex-start; justify-content: center; padding-top: 120px; z-index: 50;">
       <div class="popup">

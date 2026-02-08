@@ -7,6 +7,7 @@ type TabState = {
   title: string;
   iconClass: string;
   iconColor: string;
+  accentColor?: string;
   kind: "terminal" | "settings" | "history";
   container: HTMLDivElement;
   chat: Array<{ text: string; time: string }>;
@@ -33,6 +34,8 @@ type TabState = {
   displayElapsedMs?: number;
   lastDisplayTick?: number;
   sessionStartedAt?: string;
+  activityUntil?: number;
+  activityTimer?: number;
 };
 
 type ShellKind = "powershell" | "cmd" | "bash" | "zsh" | "fish" | "unknown";
@@ -72,6 +75,8 @@ const contextEchoList = document.getElementById("vf-echo-list");
 
 const chatLog = document.getElementById("vf-chat-log");
 const chatInput = document.getElementById("vf-chat-text") as HTMLInputElement | null;
+const chatFile = document.getElementById("vf-chat-file") as HTMLInputElement | null;
+const chatAttach = document.getElementById("vf-chat-attach");
 const chatSend = document.getElementById("vf-chat-send");
 const chatAgent = document.getElementById("vf-chat-agent");
 const commandDock = document.getElementById("command-dock");
@@ -80,8 +85,16 @@ const chatExpand = document.getElementById("vf-chat-expand");
 const chatCollapsed = document.getElementById("vf-chat-collapsed");
 const terminalJump = document.getElementById("vf-terminal-jump");
 const quickIntent = document.getElementById("vf-intent-quick");
+  const terminalAttach = document.getElementById("vf-terminal-attach");
+  const terminalFile = document.getElementById("vf-terminal-file") as HTMLInputElement | null;
+  const terminalActions = document.getElementById("vf-terminal-actions");
+const voiceOverlay = document.getElementById("vf-voice-overlay");
+const voiceText = document.getElementById("vf-voice-text");
 const settingsOpen = document.getElementById("vf-settings-open");
 const historyOpen = document.getElementById("vf-history-open");
+const tabColorMenu = document.getElementById("vf-tab-color-menu");
+const tabColorOptions = document.getElementById("vf-tab-color-options");
+const tabColorClear = document.getElementById("vf-tab-color-clear");
 
 const minimizeButton = document.getElementById("vf-window-minimize");
 const maximizeButton = document.getElementById("vf-window-maximize");
@@ -171,6 +184,8 @@ if (
   !contextEchoList ||
   !chatLog ||
   !chatInput ||
+  !chatFile ||
+  !chatAttach ||
   !chatSend ||
   !chatAgent ||
   !commandDock ||
@@ -178,9 +193,17 @@ if (
   !chatExpand ||
   !chatCollapsed ||
   !terminalJump ||
+  !terminalAttach ||
+  !terminalFile ||
+  !terminalActions ||
   !quickIntent ||
+  !voiceOverlay ||
+  !voiceText ||
   !settingsOpen ||
   !historyOpen ||
+  !tabColorMenu ||
+  !tabColorOptions ||
+  !tabColorClear ||
   !minimizeButton ||
   !maximizeButton ||
   !maximizeIcon ||
@@ -253,9 +276,188 @@ let confirmAction: (() => void) | null = null;
 let settingsRepoStats = new Map<string, { name: string; count: number }>();
 const fileActivityByTab = new Map<string, Map<string, { type: "read" | "write"; expiresAt: number }>>();
 const fileActivityTimers = new Map<string, number>();
+const tabActivityTimers = new Map<string, number>();
 const selectedFileByTab = new Map<string, string>();
 let isScrollDragging = false;
 let includeVibeTrace = false;
+let tabColorTargetId: string | null = null;
+
+const TAB_COLOR_CHOICES = [
+  "#3b82f6",
+  "#22c55e",
+  "#f97316",
+  "#a855f7",
+  "#06b6d4",
+  "#f43f5e"
+];
+
+const openTabColorMenu = (tabId: string, x: number, y: number) => {
+  if (!tabColorMenu || !tabColorOptions || !tabColorClear) {
+    return;
+  }
+  tabColorTargetId = tabId;
+  tabColorOptions.innerHTML = "";
+  for (const color of TAB_COLOR_CHOICES) {
+    const swatch = document.createElement("button");
+    swatch.type = "button";
+    swatch.className = "tab-color-swatch";
+    swatch.style.background = color;
+    swatch.addEventListener("click", () => {
+      const tab = tabs.get(tabId);
+      if (tab) {
+        tab.accentColor = color;
+        renderTabs();
+      }
+      closeTabColorMenu();
+    });
+    tabColorOptions.appendChild(swatch);
+  }
+  tabColorClear.onclick = () => {
+    const tab = tabs.get(tabId);
+    if (tab) {
+      tab.accentColor = undefined;
+      renderTabs();
+    }
+    closeTabColorMenu();
+  };
+  tabColorMenu.style.left = `${x}px`;
+  tabColorMenu.style.top = `${y}px`;
+  tabColorMenu.classList.add("is-open");
+  tabColorMenu.setAttribute("aria-hidden", "false");
+};
+
+const closeTabColorMenu = () => {
+  if (!tabColorMenu) {
+    return;
+  }
+  tabColorMenu.classList.remove("is-open");
+  tabColorMenu.setAttribute("aria-hidden", "true");
+  tabColorTargetId = null;
+};
+
+const getStoredBool = (key: string, fallback: boolean) => {
+  try {
+    const value = localStorage.getItem(key);
+    if (value === null) {
+      return fallback;
+    }
+    return value === "1";
+  } catch {
+    return fallback;
+  }
+};
+
+const setStoredBool = (key: string, value: boolean) => {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    // ignore
+  }
+};
+
+audioEnabled = getStoredBool("vf-ui-audio", true);
+
+const insertTextAtCursor = (input: HTMLInputElement, text: string) => {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  const before = input.value.slice(0, start);
+  const after = input.value.slice(end);
+  const next = `${before}${text}${after}`;
+  const cursor = start + text.length;
+  input.value = next;
+  input.setSelectionRange(cursor, cursor);
+  input.focus();
+};
+
+const handleImagePaste = async (event: ClipboardEvent, target: HTMLInputElement) => {
+  if (!event.clipboardData) {
+    return;
+  }
+  const hasImage = Array.from(event.clipboardData.items || []).some((item) =>
+    item.type.startsWith("image/")
+  );
+  if (!hasImage) {
+    return;
+  }
+  event.preventDefault();
+  const tab = activeTabId ? tabs.get(activeTabId) : null;
+  if (!tab || tab.kind !== "terminal") {
+    return;
+  }
+  const repoKey = tab.projectRoot || tab.cwd || null;
+  const relPath = await window.vibeflow.saveClipboardImage(repoKey);
+  if (!relPath) {
+    return;
+  }
+  insertTextAtCursor(target, relPath);
+  if (activeTabId) {
+    markUserActivity(activeTabId);
+  }
+  playClick();
+};
+
+const handleImageFileUpload = async (file: File, target: HTMLInputElement) => {
+  if (!file || !file.type.startsWith("image/")) {
+    return;
+  }
+  const tab = activeTabId ? tabs.get(activeTabId) : null;
+  if (!tab || tab.kind !== "terminal") {
+    return;
+  }
+  const repoKey = tab.projectRoot || tab.cwd || null;
+  const buffer = await file.arrayBuffer();
+  const relPath = await window.vibeflow.saveImageFile(
+    repoKey,
+    file.name || "image.png",
+    new Uint8Array(buffer)
+  );
+  if (!relPath) {
+    return;
+  }
+  insertTextAtCursor(target, relPath);
+  if (activeTabId) {
+    markUserActivity(activeTabId);
+  }
+  playClick();
+};
+
+const insertTextIntoTerminal = (tabId: string, text: string) => {
+  if (!text) {
+    return;
+  }
+  window.vibeflow.write(tabId, text);
+  const tab = tabs.get(tabId);
+  if (tab) {
+    tab.currentLine = `${tab.currentLine || ""}${text}`;
+    markUserActivity(tabId);
+    markTabActivity(tabId);
+  }
+};
+
+const insertPathIntoTerminal = (tabId: string, relPath: string) =>
+  insertTextIntoTerminal(tabId, relPath);
+
+const handleTerminalImageUpload = async (file: File, tabId: string) => {
+  if (!file || !file.type.startsWith("image/")) {
+    return;
+  }
+  const tab = tabs.get(tabId);
+  if (!tab || tab.kind !== "terminal") {
+    return;
+  }
+  const repoKey = tab.projectRoot || tab.cwd || null;
+  const buffer = await file.arrayBuffer();
+  const relPath = await window.vibeflow.saveImageFile(
+    repoKey,
+    file.name || "image.png",
+    new Uint8Array(buffer)
+  );
+  if (!relPath) {
+    return;
+  }
+  insertPathIntoTerminal(tabId, relPath);
+  playClick();
+};
 
 const setTerminalStdin = (term: Terminal, enabled: boolean) => {
   const termAny = term as unknown as {
@@ -273,8 +475,9 @@ const setTerminalStdin = (term: Terminal, enabled: boolean) => {
 };
 
 const sendCommandToTerminal = (tabId: string, input: string, shellKind: ShellKind) => {
-  const newline = shellKind === "powershell" || shellKind === "cmd" ? "\r\n" : "\n";
+  const newline = shellKind === "powershell" || shellKind === "cmd" ? "\r" : "\n";
   window.vibeflow.write(tabId, `${input}${newline}`);
+  markTabActivity(tabId);
 };
 
 const stripAnsi = (value: string) =>
@@ -383,6 +586,111 @@ const prefersReducedMotion =
   window.matchMedia &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+let sttActive = false;
+let sttTargetInput: HTMLInputElement | null = null;
+let sttPhase: "idle" | "listening" | "processing" = "idle";
+const sttDebug = (() => {
+  try {
+    return localStorage.getItem("vf-stt-debug") === "1";
+  } catch {
+    return false;
+  }
+})();
+
+const logStt = (...args: unknown[]) => {
+  if (!(sttDebug || DEBUG_UI)) {
+    return;
+  }
+  console.log("[vibeflow-stt]", ...args);
+  try {
+    const message = args
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return String(item);
+        }
+      })
+      .join(" ");
+    window.vibeflow.logStt(message);
+  } catch {
+    // ignore
+  }
+};
+
+const resolveVoiceTarget = () => {
+  if (overlayMode && overlayInput) {
+    return overlayInput;
+  }
+  if (!chatInput) {
+    return null;
+  }
+  if (chatIsCollapsed) {
+    setChatCollapsed(false);
+  }
+  return chatInput;
+};
+
+const resolveVoiceTargetForStt = () => {
+  if (overlayMode && overlayInput) {
+    return overlayInput;
+  }
+  if (!chatInput) {
+    return null;
+  }
+  if (chatIsCollapsed) {
+    return null;
+  }
+  return chatInput;
+};
+
+const showVoiceOverlay = (
+  active: boolean,
+  text = "",
+  phase: "idle" | "listening" | "processing" = "idle"
+) => {
+  voiceOverlay.classList.toggle("is-open", active);
+  voiceOverlay.classList.toggle("is-listening", active && phase === "listening");
+  voiceOverlay.classList.toggle("is-processing", active && phase === "processing");
+  voiceOverlay.setAttribute("aria-hidden", (!active).toString());
+  voiceText.textContent = text;
+  sttPhase = active ? phase : "idle";
+};
+
+const startVoiceInput = () => {
+  if (sttActive) {
+    logStt("toggle-stop");
+    showVoiceOverlay(true, "Processing...", "processing");
+    void window.vibeflow.stopStt().then((ok) => {
+      if (!ok) {
+        sttActive = false;
+        sttTargetInput = null;
+        showVoiceOverlay(false, "");
+      }
+    });
+    return;
+  }
+  const targetInput = resolveVoiceTargetForStt();
+  const activeTab = activeTabId ? tabs.get(activeTabId) : null;
+  if (!targetInput && !(chatIsCollapsed && activeTab?.kind === "terminal")) {
+    return;
+  }
+  sttTargetInput = targetInput;
+  sttActive = true;
+  showVoiceOverlay(true, "Listening...", "listening");
+  logStt("start-recording");
+  void window.vibeflow.startStt().then((ok) => {
+    if (!ok && sttActive) {
+      sttActive = false;
+      showVoiceOverlay(true, "STT not ready.", "processing");
+      window.setTimeout(() => showVoiceOverlay(false, ""), 1800);
+    }
+  });
+};
+
 type LastSession = Awaited<ReturnType<typeof window.vibeflow.getLastSession>>;
 type ActiveSession = Awaited<ReturnType<typeof window.vibeflow.getActiveSession>>;
 type SessionRecord = NonNullable<LastSession>;
@@ -424,6 +732,34 @@ const markUserActivity = (tabId: string) => {
     return;
   }
   tab.lastUserActionAt = Date.now();
+};
+
+const TAB_ACTIVITY_MS = 1800;
+
+const markTabActivity = (tabId: string) => {
+  const tab = tabs.get(tabId);
+  if (!tab || tab.kind !== "terminal") {
+    return;
+  }
+  const now = Date.now();
+  const wasActive = tab.activityUntil && tab.activityUntil > now;
+  tab.activityUntil = now + TAB_ACTIVITY_MS;
+  if (!wasActive) {
+    renderTabs();
+  }
+  const existing = tabActivityTimers.get(tabId);
+  if (existing) {
+    window.clearTimeout(existing);
+  }
+  const timer = window.setTimeout(() => {
+    const current = tabs.get(tabId);
+    if (current && current.activityUntil && current.activityUntil <= Date.now()) {
+      current.activityUntil = undefined;
+      renderTabs();
+    }
+    tabActivityTimers.delete(tabId);
+  }, TAB_ACTIVITY_MS + 80);
+  tabActivityTimers.set(tabId, timer);
 };
 
 const formatHms = (ms: number) => {
@@ -675,6 +1011,13 @@ const renderSettingsPane = (container: HTMLDivElement) => {
             </div>
             <div class="settings-command">
               <div class="settings-command-text">
+                <div class="settings-command-title">Voice input</div>
+                <div class="settings-command-hint">Dictate into chat, intent, or echo fields.</div>
+              </div>
+              <kbd>Ctrl+Shift+S</kbd>
+            </div>
+            <div class="settings-command">
+              <div class="settings-command-text">
                 <div class="settings-command-title">Time Echo</div>
                 <div class="settings-command-hint">Leave a message for your future self.</div>
               </div>
@@ -779,6 +1122,7 @@ const renderSettingsPane = (container: HTMLDivElement) => {
   void updateVibeTraceToggle();
   settingsAudioInput?.addEventListener("change", () => {
     audioEnabled = !!settingsAudioInput?.checked;
+    setStoredBool("vf-ui-audio", audioEnabled);
     if (audioEnabled) {
       playClick();
     }
@@ -858,6 +1202,7 @@ const setToolPanelCollapsed = (collapsed: boolean) => {
   if (icon) {
     icon.className = collapsed ? "fa-solid fa-chevron-right" : "fa-solid fa-chevron-left";
   }
+  setStoredBool("vf-ui-tool-collapsed", collapsed);
 };
 
 const getFileActivityMap = (tabId: string) => {
@@ -920,6 +1265,7 @@ const markFileActivity = (tabId: string, relPath: string, type: "read" | "write"
   }, ttl + 50);
   fileActivityTimers.set(timerKey, timer);
   refreshFileActivityStyles(tabId);
+  markTabActivity(tabId);
 };
 
 const renderFileTree = (node: FileNode | null) => {
@@ -1140,6 +1486,7 @@ const handlePtyData = (tabId: string, data: string) => {
     return;
   }
   tab.lastOutputAt = Date.now();
+  markTabActivity(tabId);
   if (!enableExitMarkers) {
     const shouldFollow = tab.followOutput !== false;
     tab.term.write(data);
@@ -1256,8 +1603,7 @@ const setChatCollapsed = (collapsed: boolean) => {
   chatToggle.setAttribute("aria-expanded", (!collapsed).toString());
   const activeTab = activeTabId ? tabs.get(activeTabId) : null;
   const showTerminalActions = activeTab?.kind === "terminal";
-  quickIntent.style.display = showTerminalActions ? "inline-flex" : "none";
-  terminalJump.style.display = showTerminalActions ? "inline-flex" : "none";
+  terminalActions.style.display = showTerminalActions && collapsed ? "flex" : "none";
   chatInput.disabled = collapsed;
   if (collapsed) {
     chatSend.setAttribute("disabled", "true");
@@ -1276,6 +1622,7 @@ const setChatCollapsed = (collapsed: boolean) => {
   if (collapsed) {
     chatInput.blur();
   }
+  setStoredBool("vf-ui-chat-collapsed", collapsed);
 };
 
 const createTerminal = (tabId: string) => {
@@ -1421,6 +1768,13 @@ const renderTabs = () => {
     if (tab.id === activeTabId) {
       button.classList.add("active");
     }
+    if (tab.accentColor) {
+      button.classList.add("is-colored");
+      button.style.setProperty("--tab-accent", tab.accentColor);
+    } else {
+      button.classList.remove("is-colored");
+      button.style.removeProperty("--tab-accent");
+    }
     button.dataset.tabId = tab.id;
     button.draggable = true;
 
@@ -1431,6 +1785,15 @@ const renderTabs = () => {
     const title = document.createElement("span");
     title.className = "tab-title";
     title.textContent = tab.title;
+
+    let activity: HTMLElement | null = null;
+    if (tab.kind === "terminal") {
+      activity = document.createElement("i");
+      activity.className = "fa-solid fa-circle-notch tab-activity";
+      if (tab.activityUntil && tab.activityUntil > Date.now()) {
+        activity.classList.add("is-active");
+      }
+    }
 
     const close = document.createElement("i");
     close.className = "fa-solid fa-xmark tab-close";
@@ -1446,6 +1809,9 @@ const renderTabs = () => {
 
     button.appendChild(icon);
     button.appendChild(title);
+    if (activity) {
+      button.appendChild(activity);
+    }
     button.appendChild(close);
     button.addEventListener("click", () => setActiveTab(tab.id, "tab-click"));
     button.addEventListener("dragstart", (event) => {
@@ -1459,6 +1825,10 @@ const renderTabs = () => {
     button.addEventListener("dragover", (event) => {
       event.preventDefault();
       button.classList.add("drag-over");
+    });
+    button.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openTabColorMenu(tab.id, event.clientX, event.clientY);
     });
     button.addEventListener("drop", (event) => {
       event.preventDefault();
@@ -1496,8 +1866,7 @@ const setActiveTab = (tabId: string, source = "unknown") => {
   }
   welcomePane.classList.remove("is-open");
   const showTerminalActions = nextTab.kind === "terminal";
-  quickIntent.style.display = showTerminalActions ? "inline-flex" : "none";
-  terminalJump.style.display = showTerminalActions ? "inline-flex" : "none";
+  terminalActions.style.display = showTerminalActions && chatIsCollapsed ? "flex" : "none";
   if (previousTab?.kind === "terminal" && previousTab.term && nextTab.kind !== "terminal") {
     setTerminalStdin(previousTab.term, false);
   }
@@ -1584,6 +1953,7 @@ const createTab = async (cwd?: string) => {
   });
   term.onData((data) => {
     markUserActivity(tabInfo.id);
+    markTabActivity(tabInfo.id);
     window.vibeflow.write(tabInfo.id, data);
     if (chatIsCollapsed) {
       const tab = tabs.get(tabInfo.id);
@@ -1661,6 +2031,11 @@ const removeTabLocal = (tabId: string) => {
   tabOrder = tabOrder.filter((id) => id !== tabId);
   fileActivityByTab.delete(tabId);
   selectedFileByTab.delete(tabId);
+  const activityTimer = tabActivityTimers.get(tabId);
+  if (activityTimer) {
+    window.clearTimeout(activityTimer);
+    tabActivityTimers.delete(tabId);
+  }
   for (const key of Array.from(fileActivityTimers.keys())) {
     if (key.startsWith(`${tabId}:`)) {
       const timer = fileActivityTimers.get(key);
@@ -1728,11 +2103,14 @@ const showIdleState = () => {
 
 const renderChat = () => {
   const tab = activeTabId ? tabs.get(activeTabId) : null;
+  const showTerminalActions = tab?.kind === "terminal";
   chatLog.innerHTML = "";
   if (!tab || tab.kind !== "terminal") {
     chatInput.disabled = true;
     chatSend.setAttribute("disabled", "true");
     chatAgent.setAttribute("disabled", "true");
+    chatAttach.setAttribute("disabled", "true");
+    terminalActions.style.display = "none";
     chatInput.placeholder = tab ? "Chat disabled for this tab." : "Select a repository to begin...";
     return;
   }
@@ -1740,11 +2118,15 @@ const renderChat = () => {
     chatInput.disabled = true;
     chatSend.setAttribute("disabled", "true");
     chatAgent.setAttribute("disabled", "true");
+    chatAttach.setAttribute("disabled", "true");
+    terminalActions.style.display = showTerminalActions ? "flex" : "none";
     chatInput.placeholder = "Chat is collapsed...";
   } else {
   chatInput.disabled = false;
   chatSend.removeAttribute("disabled");
   chatAgent.removeAttribute("disabled");
+  chatAttach.removeAttribute("disabled");
+  terminalActions.style.display = "none";
   chatInput.placeholder = "Send command to terminal...";
   }
   for (const message of tab.chat) {
@@ -2416,8 +2798,17 @@ const sendChatCommand = () => {
   renderChat();
   const command = buildCommandForShell(value, tab.shellKind);
   sendCommandToTerminal(activeTabId, command, tab.shellKind);
+  if (tab.term) {
+    tab.followOutput = true;
+    tab.term.scrollToBottom();
+    updateTerminalScrollbar();
+  }
   chatInput.value = "";
-  focusActiveTerminal();
+  if (chatIsCollapsed) {
+    focusActiveTerminal();
+  } else {
+    chatInput.focus();
+  }
   playClick();
 };
 
@@ -2539,6 +2930,10 @@ overlayInput.addEventListener("keydown", async (event) => {
   }
 });
 
+overlayInput.addEventListener("paste", (event) => {
+  void handleImagePaste(event, overlayInput);
+});
+
 overlay.addEventListener("click", (event) => {
   if (event.target === overlay) {
     closeOverlay();
@@ -2568,27 +2963,32 @@ confirmOverlay.addEventListener("click", (event) => {
 window.addEventListener(
   "keydown",
   (event) => {
+    const pressedKey = event.key.toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && pressedKey === "s") {
+      event.preventDefault();
+      startVoiceInput();
+      return;
+    }
     if (overlayMode) {
       return;
     }
     const target = event.target as HTMLElement | null;
-  if (target && (target.tagName === "INPUT" || target.isContentEditable)) {
-    return;
-  }
-  const key = event.key.toLowerCase();
-  if (event.altKey && key === "i") {
-    event.preventDefault();
-    openOverlay("intent");
-  } else if (event.altKey && key === "e") {
-    event.preventDefault();
-    openOverlay("echo");
-  } else if (event.altKey && key === "p") {
-    event.preventDefault();
-    openOverlay("thought");
-  } else if ((event.ctrlKey || event.metaKey) && key === "o") {
-    event.preventDefault();
-    void selectRepoAndCreateTab();
-  }
+    if (target && (target.tagName === "INPUT" || target.isContentEditable)) {
+      return;
+    }
+    if (event.altKey && pressedKey === "i") {
+      event.preventDefault();
+      openOverlay("intent");
+    } else if (event.altKey && pressedKey === "e") {
+      event.preventDefault();
+      openOverlay("echo");
+    } else if (event.altKey && pressedKey === "p") {
+      event.preventDefault();
+      openOverlay("thought");
+    } else if ((event.ctrlKey || event.metaKey) && pressedKey === "o") {
+      event.preventDefault();
+      void selectRepoAndCreateTab();
+    }
   },
   { capture: true }
 );
@@ -2924,6 +3324,61 @@ window.vibeflow.onPtyExit((tabId) => {
 
 window.vibeflow.onRepoFileActivity(({ tabId, relPath }) => {
   markFileActivity(tabId, relPath, "write");
+  markTabActivity(tabId);
+});
+
+window.addEventListener("click", () => {
+  closeTabColorMenu();
+});
+
+window.addEventListener("error", (event) => {
+  logStt("window-error", event.message || "unknown");
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  logStt("unhandledrejection", event.reason || "unknown");
+});
+
+window.vibeflow.onSttStatus((message) => {
+  if (!message) {
+    return;
+  }
+  const lower = message.toLowerCase();
+  const phase =
+    lower.includes("transcrib") || lower.includes("prepar")
+      ? "processing"
+      : "listening";
+  showVoiceOverlay(true, message, phase);
+});
+
+window.vibeflow.onSttResult((text) => {
+  sttActive = false;
+  showVoiceOverlay(false, "");
+  if (text) {
+    const activeTab = activeTabId ? tabs.get(activeTabId) : null;
+    if (chatIsCollapsed && activeTab?.kind === "terminal") {
+      insertTextIntoTerminal(activeTab.id, text);
+      focusActiveTerminal();
+    } else {
+      const targetInput = sttTargetInput || resolveVoiceTarget();
+      if (targetInput) {
+        insertTextAtCursor(targetInput, text);
+        if (activeTabId) {
+          markUserActivity(activeTabId);
+        }
+      }
+    }
+  }
+  sttTargetInput = null;
+  sttPhase = "idle";
+});
+
+window.vibeflow.onSttError((message) => {
+  sttActive = false;
+  showVoiceOverlay(true, message || "Speech error.", "processing");
+  window.setTimeout(() => showVoiceOverlay(false, ""), 1800);
+  sttTargetInput = null;
+  sttPhase = "idle";
 });
 
 tabAddButton.addEventListener("click", () => {
@@ -2958,11 +3413,53 @@ fileToggle.addEventListener("click", () => {
 
 chatSend.addEventListener("click", sendChatCommand);
 chatAgent.addEventListener("click", saveIntentFromChat);
+chatAttach?.addEventListener("click", () => {
+  if (!chatFile || !chatInput) {
+    return;
+  }
+  if (!activeTabId || tabs.get(activeTabId)?.kind !== "terminal") {
+    return;
+  }
+  chatFile.value = "";
+  chatFile.click();
+});
+chatFile?.addEventListener("change", async () => {
+  if (!chatFile || !chatInput) {
+    return;
+  }
+  const file = chatFile.files?.[0];
+  if (!file) {
+    return;
+  }
+  await handleImageFileUpload(file, chatInput);
+  chatFile.value = "";
+});
+terminalAttach?.addEventListener("click", () => {
+  if (!terminalFile || !activeTabId || tabs.get(activeTabId)?.kind !== "terminal") {
+    return;
+  }
+  terminalFile.value = "";
+  terminalFile.click();
+});
+terminalFile?.addEventListener("change", async () => {
+  if (!terminalFile || !activeTabId) {
+    return;
+  }
+  const file = terminalFile.files?.[0];
+  if (!file) {
+    return;
+  }
+  await handleTerminalImageUpload(file, activeTabId);
+  terminalFile.value = "";
+});
 chatInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     sendChatCommand();
   }
+});
+chatInput.addEventListener("paste", (event) => {
+  void handleImagePaste(event, chatInput);
 });
 
 chatToggle.addEventListener("click", () => {
@@ -3024,10 +3521,10 @@ terminalScrollbar.addEventListener("mousedown", (event) => {
 });
 
 contextToggle.addEventListener("click", () => {
-  contextPanel.classList.toggle("collapsed");
-  contextIcon.className = contextPanel.classList.contains("collapsed")
-    ? "fa-solid fa-angle-left"
-    : "fa-solid fa-angle-right";
+  const next = !contextPanel.classList.contains("collapsed");
+  contextPanel.classList.toggle("collapsed", next);
+  contextIcon.className = next ? "fa-solid fa-angle-left" : "fa-solid fa-angle-right";
+  setStoredBool("vf-ui-context-collapsed", next);
   fitActiveTerminal();
   playClick();
 });
@@ -3130,9 +3627,16 @@ setInterval(() => {
 
 void updateWindowButtons();
 updateAudioToggle();
-setChatCollapsed(true);
+const storedChatCollapsed = getStoredBool("vf-ui-chat-collapsed", true);
+setChatCollapsed(storedChatCollapsed);
 setToolPanelVisible(false);
-setToolPanelCollapsed(false);
+const storedToolCollapsed = getStoredBool("vf-ui-tool-collapsed", false);
+setToolPanelCollapsed(storedToolCollapsed);
+const storedContextCollapsed = getStoredBool("vf-ui-context-collapsed", false);
+contextPanel.classList.toggle("collapsed", storedContextCollapsed);
+contextIcon.className = storedContextCollapsed
+  ? "fa-solid fa-angle-left"
+  : "fa-solid fa-angle-right";
 welcomeSelect.addEventListener("click", () => {
   playClick();
   void selectRepoAndCreateTab();

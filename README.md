@@ -92,13 +92,21 @@
 vf start
 vf intent "Ship the release"
 vf park "Follow up with QA on installer"
-vf echo "Don’t break login"
+vf echo "Don't break login"
+vf stt --intent
 vf resume
 vf status
 vf end
 </code></pre>
 
 <p><strong>Learn more:</strong> <a href="cli/README.md">CLI documentation</a></p>
+
+<h3>CLI Speech to Text</h3>
+<ul>
+  <li><code>vf stt setup</code> downloads Whisper CLI + model (Windows/macOS/Linux).</li>
+  <li>macOS/Linux need <code>unzip</code> installed, or set <code>VF_WHISPER_BIN</code> + <code>VF_WHISPER_MODEL</code>.</li>
+  <li><code>vf stt --copy</code> copies to clipboard instead of printing.</li>
+</ul>
 
 <h2>Tech Stack</h2>
 

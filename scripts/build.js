@@ -13,7 +13,7 @@ const builds = [
     outfile: "dist/main.js",
     platform: "node",
     target: "node18",
-    external: ["electron", "node-pty"]
+    external: ["electron", "node-pty", "ffmpeg-static"]
   },
   {
     entryPoints: ["app/preload.ts"],

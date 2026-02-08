@@ -174,11 +174,23 @@ declare global {
       getAllSessions: () => Promise<SessionRecord[]>;
       deleteSession: (sessionId: string) => Promise<boolean>;
       deleteRepoContext: (repoKey: string) => Promise<number>;
+      saveClipboardImage: (repoKey: string | null) => Promise<string | null>;
+      saveImageFile: (
+        repoKey: string | null,
+        name: string,
+        bytes: Uint8Array
+      ) => Promise<string | null>;
       getVibeTraceInclude: (repoKey: string | null) => Promise<boolean>;
       setVibeTraceInclude: (repoKey: string | null, include: boolean) => Promise<boolean>;
       readVibeTrace: (repoKey: string | null) => Promise<VibeTracePayload | null>;
       getAppVersion: () => Promise<string>;
       openExternal: (url: string) => Promise<void>;
+      logStt: (message: string) => void;
+      startStt: () => Promise<boolean>;
+      stopStt: () => Promise<boolean>;
+      onSttStatus: (callback: (message: string) => void) => () => void;
+      onSttResult: (callback: (text: string) => void) => () => void;
+      onSttError: (callback: (message: string) => void) => () => void;
       getRepoTree: (tabId: string) => Promise<FileNode | null>;
       readRepoFile: (tabId: string, relPath: string) => Promise<FileReadResult>;
       onPtyData: (callback: (tabId: string, data: string) => void) => () => void;

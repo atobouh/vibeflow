@@ -36,6 +36,33 @@ contextBridge.exposeInMainWorld("vibeflow", {
     ipcRenderer.invoke("repo-parked-thought-delete", repoKey, thoughtId),
   getAppVersion: () => ipcRenderer.invoke("app-get-version"),
   openExternal: (url: string) => ipcRenderer.invoke("app-open-external", url),
+  logStt: (message: string) => ipcRenderer.send("stt-log", message),
+  startStt: () => ipcRenderer.invoke("stt-start"),
+  stopStt: () => ipcRenderer.invoke("stt-stop"),
+  onSttStatus: (callback: (message: string) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      message: string
+    ) => callback(message);
+    ipcRenderer.on("stt-status", handler);
+    return () => ipcRenderer.removeListener("stt-status", handler);
+  },
+  onSttResult: (callback: (text: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, text: string) =>
+      callback(text);
+    ipcRenderer.on("stt-result", handler);
+    return () => ipcRenderer.removeListener("stt-result", handler);
+  },
+  onSttError: (callback: (message: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, message: string) =>
+      callback(message);
+    ipcRenderer.on("stt-error", handler);
+    return () => ipcRenderer.removeListener("stt-error", handler);
+  },
+  saveClipboardImage: (repoKey: string | null) =>
+    ipcRenderer.invoke("clipboard-save-image", repoKey),
+  saveImageFile: (repoKey: string | null, name: string, bytes: Uint8Array) =>
+    ipcRenderer.invoke("image-save-file", repoKey, name, bytes),
   getRepoTree: (tabId: string) => ipcRenderer.invoke("repo-get-tree", tabId),
   readRepoFile: (tabId: string, relPath: string) =>
     ipcRenderer.invoke("repo-read-file", tabId, relPath),
