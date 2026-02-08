@@ -1,6 +1,6 @@
 # Release Guide
 
-This repo ships Windows + macOS installers via GitHub Actions.
+This repo ships Windows + macOS + Linux installers via GitHub Actions.
 
 ## Prereqs
 - Node.js 18+
@@ -18,6 +18,7 @@ Outputs are written to `release/`.
 Notes:
 - Windows installer = NSIS `.exe`
 - macOS installer = `.dmg`
+- Linux installer = AppImage `.AppImage`
 - macOS builds must run on macOS
 
 ## GitHub Release (recommended)

@@ -496,7 +496,7 @@ Usage:
   vf stt --park         Save transcription as parked thought
   vf stt --echo         Save transcription as time echo
   vf stt --device <val> Override microphone device or index
-  vf stt setup          Download Whisper CLI + model (Windows)
+  vf stt setup          Download Whisper CLI + model (all platforms)
   vf status              Show current session status
   vf status --watch      Live session timer
   vf timer               Live session timer (alias)
