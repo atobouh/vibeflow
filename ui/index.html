@@ -1919,6 +1919,19 @@
         display: none;
         align-items: center;
         justify-content: center;
+        padding: 24px;
+        background: radial-gradient(
+            1200px 600px at 15% 10%,
+            rgba(56, 189, 248, 0.08),
+            transparent 60%
+          ),
+          radial-gradient(
+            900px 520px at 90% 0%,
+            rgba(99, 102, 241, 0.08),
+            transparent 55%
+          ),
+          rgba(6, 8, 12, 0.82);
+        backdrop-filter: blur(8px);
       }
 
       .resume-screen.is-open {
@@ -1926,14 +1939,14 @@
       }
 
       .resume-card {
-        width: min(900px, 90vw);
-        padding: 32px;
-        background: #09090b;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        width: min(960px, 92vw);
+        padding: 28px 32px 26px;
+        background: linear-gradient(180deg, #0c1118 0%, #0a0e14 100%);
+        border: 1px solid rgba(148, 163, 184, 0.16);
         border-radius: 18px;
         position: relative;
         overflow: hidden;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
       }
 
       .resume-card::after {
@@ -1943,17 +1956,20 @@
         right: 0;
         width: 240px;
         height: 240px;
-        background: rgba(59, 130, 246, 0.1);
+        background: rgba(59, 130, 246, 0.08);
         border-radius: 50%;
-        filter: blur(80px);
+        filter: blur(90px);
         transform: translate(40%, -40%);
       }
 
       .resume-header {
-        text-align: center;
-        margin-bottom: 28px;
+        text-align: left;
+        margin-bottom: 22px;
         position: relative;
         z-index: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
       }
 
       .resume-pill {
@@ -1964,9 +1980,9 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.1em;
-        color: #60a5fa;
-        background: rgba(59, 130, 246, 0.1);
-        border: 1px solid rgba(59, 130, 246, 0.2);
+        color: #93c5fd;
+        background: rgba(59, 130, 246, 0.12);
+        border: 1px solid rgba(59, 130, 246, 0.25);
         padding: 4px 10px;
         border-radius: 999px;
         margin-bottom: 10px;
@@ -1980,23 +1996,24 @@
       }
 
       .resume-title {
-        font-size: 28px;
+        font-size: 26px;
         font-weight: 700;
         color: #fff;
-        margin: 0 0 8px;
+        margin: 0 0 4px;
       }
 
       .resume-sub {
-        color: #6b7280;
+        color: #94a3b8;
         font-size: 13px;
+        line-height: 1.5;
       }
 
       .resume-repo {
-        margin-top: 10px;
+        margin-top: 6px;
         font-size: 16px;
         font-weight: 600;
-        color: #60a5fa;
-        text-shadow: 0 0 16px rgba(59, 130, 246, 0.45);
+        color: #7dd3fc;
+        text-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
       }
 
       .resume-trace {
@@ -2016,44 +2033,45 @@
 
       .resume-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 16px;
-        margin-bottom: 24px;
+        grid-template-columns: minmax(220px, 1fr) minmax(320px, 2fr);
+        gap: 14px;
+        margin-bottom: 20px;
         position: relative;
         z-index: 1;
       }
 
       .resume-card-box {
-        background: #121214;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(17, 24, 39, 0.65);
+        border: 1px solid rgba(148, 163, 184, 0.16);
         border-radius: 12px;
-        padding: 16px;
+        padding: 16px 18px;
       }
 
       .resume-label {
         font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 0.14em;
-        color: #6b7280;
+        color: #9aa4b2;
         margin-bottom: 6px;
       }
 
       .resume-value {
         font-size: 20px;
         font-family: "JetBrains Mono", "Cascadia Mono", monospace;
-        color: #fff;
+        color: #f8fafc;
       }
 
       .resume-flow {
         font-size: 14px;
-        color: #4ade80;
+        color: #86efac;
         display: flex;
         align-items: center;
         gap: 6px;
       }
 
       .resume-intent {
-        grid-column: span 2;
+        grid-column: 2;
+        grid-row: 1 / span 2;
         display: flex;
         flex-direction: column;
         gap: 12px;
@@ -2061,14 +2079,15 @@
 
       .resume-intent-text {
         font-size: 16px;
-        color: #e5e7eb;
+        color: #e2e8f0;
+        line-height: 1.6;
       }
 
       .resume-next {
         padding-top: 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        border-top: 1px solid rgba(148, 163, 184, 0.18);
         font-size: 13px;
-        color: #d1d5db;
+        color: #cbd5f5;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -2076,18 +2095,20 @@
 
       .resume-actions {
         display: flex;
-        justify-content: center;
+        justify-content: flex-end;
         gap: 12px;
         position: relative;
         z-index: 1;
+        padding-top: 14px;
+        border-top: 1px solid rgba(148, 163, 184, 0.12);
       }
 
       .resume-actions button {
         padding: 10px 16px;
-        background: #121214;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.18);
         border-radius: 8px;
-        color: #d1d5db;
+        color: #e2e8f0;
         font-size: 13px;
         font-weight: 600;
         display: flex;
@@ -2097,10 +2118,10 @@
       }
 
       .resume-actions button.primary {
-        background: #2563eb;
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
         color: #fff;
         border-color: transparent;
-        box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
+        box-shadow: 0 10px 26px rgba(37, 99, 235, 0.28);
       }
 
       .new-tab-screen {
