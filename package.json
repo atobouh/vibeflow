@@ -33,6 +33,9 @@
     "appId": "com.vibeflow.app",
     "productName": "VibeFlow",
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**"
+    ],
     "directories": {
       "output": "release",
       "buildResources": "build"

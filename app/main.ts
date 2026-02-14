@@ -22,7 +22,34 @@ let sessionManager: SessionManager | null = null;
 app.commandLine.appendSwitch("disable-gpu");
 app.commandLine.appendSwitch("disable-gpu-compositing");
 
-const ffmpegPath = require("ffmpeg-static");
+const resolveFfmpegPath = () => {
+  const envPath = process.env.FFMPEG_PATH;
+  if (envPath && fs.existsSync(envPath)) {
+    return envPath;
+  }
+  let rawPath: string | null = null;
+  try {
+    rawPath = require("ffmpeg-static");
+  } catch {
+    rawPath = null;
+  }
+  if (!rawPath) {
+    return null;
+  }
+  if (rawPath.includes("app.asar")) {
+    const unpacked = rawPath.replace("app.asar", "app.asar.unpacked");
+    if (fs.existsSync(unpacked)) {
+      return unpacked;
+    }
+    return null;
+  }
+  if (fs.existsSync(rawPath)) {
+    return rawPath;
+  }
+  return null;
+};
+
+const ffmpegPath = resolveFfmpegPath();
 
 const appendLog = (filename: string, message: string) => {
   try {
